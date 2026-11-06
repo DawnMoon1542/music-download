@@ -1,0 +1,8 @@
+<resources>
+    <!-- Compose owns all styling; the platform theme only removes the action bar. -->
+    <style name="Theme.MusicDownload" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
