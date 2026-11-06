@@ -164,6 +164,8 @@ class DefaultChkszApi(
             streamUrl = streamUrl,
             sizeBytes = size,
             md5 = md5?.takeIf { it.isNotBlank() },
+            // 解析接口不返回 ETag；它是直链响应的实体标签，只能由下载层在请求后补充。
+            etag = null,
         )
     }
 

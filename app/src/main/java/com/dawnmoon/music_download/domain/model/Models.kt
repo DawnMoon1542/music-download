@@ -43,7 +43,12 @@ data class Quota(
     val limitPerMinute: Int?,
 )
 
-/** 解析得到的可下载曲目；[actualQuality] 可能低于请求音质，因服务端会静默降级。 */
+/**
+ * 解析得到的可下载曲目；[actualQuality] 可能低于请求音质，因服务端会静默降级。
+ *
+ * [etag] 是直链资源的实体标签，供续传时的 `If-Range` 校验；解析接口不返回时为空，
+ * 由下载层从直链响应头取得后写入任务。
+ */
 data class ResolvedTrack(
     val songId: SongId,
     val title: String,
@@ -56,6 +61,7 @@ data class ResolvedTrack(
     val streamUrl: String,
     val sizeBytes: Long?,
     val md5: String?,
+    val etag: String?,
 )
 
 /** 文件名主名，不含目录与重名序号；重名序号由下载层追加。 */

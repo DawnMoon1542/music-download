@@ -166,6 +166,7 @@ class QualityResolverTest {
         streamUrl = "https://cdn.example.com/audio/song.flac",
         sizeBytes = 1_000L,
         md5 = null,
+        etag = null,
     )
 
     private fun successOf(response: ApiResponse<ResolvedTrack>): ResolvedTrack = when (response) {
