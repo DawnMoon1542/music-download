@@ -47,7 +47,7 @@
 - [x] Task 4-1 — ChkszApi、DTO、错误映射与额度头
 - [x] Task 4-2 — 短链解析
 - [x] Task 4-3 — ApiCaller 429 重试与 KeyValidator
-- [ ] Task 4-4 — DefaultQualityResolver 降级策略
+- [x] Task 4-4 — DefaultQualityResolver 降级策略
 
 ### Group 5：仓库与装配
 
