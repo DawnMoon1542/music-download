@@ -27,7 +27,7 @@
 
 ### Group 1：下载基础设施
 
-- [ ] Task 1-1 — TaskFileStore 接口与 MediaStore 实现
+- [x] Task 1-1 — TaskFileStore 接口与 MediaStore 实现
 - [ ] Task 1-2 — AdaptiveLimiter 可调并发门闸
 - [ ] Task 1-3 — FileNamer 重名分配
 
