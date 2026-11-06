@@ -54,7 +54,7 @@
 - [x] Task 5-1 — DefaultTaskRepository 入队、去重、状态写入与文件名分配
 - [x] Task 5-2 — AppContainer、AppDependencies、Application 与启动恢复
 - [x] Task 1-修复1：配置 ChKSz API 客户端超时
-- [ ] Task 1-修复2：修复暂停后文件名预留泄漏
+- [x] Task 1-修复2：修复暂停后文件名预留泄漏
 
 ---
 

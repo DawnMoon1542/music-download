@@ -929,6 +929,31 @@ class DefaultTaskRepositoryTest {
     }
 
     @Test
+    fun `markPaused releases the reservation so another task can take the same name`() = runTest {
+        val repository = repository()
+        val paused = dao.insert(entity(status = TaskStatus.Downloading))
+        assertEquals("a.mp3", repository.allocateFileName(paused, BaseFileName("a.mp3")))
+
+        repository.markPaused(paused)
+
+        val next = dao.insert(entity(status = TaskStatus.Downloading))
+        assertEquals("a.mp3", repository.allocateFileName(next, BaseFileName("a.mp3")))
+    }
+
+    @Test
+    fun `a resumed task can reallocate its released name without an index suffix`() = runTest {
+        val repository = repository()
+        val id = dao.insert(entity(status = TaskStatus.Downloading))
+        assertEquals("a.mp3", repository.allocateFileName(id, BaseFileName("a.mp3")))
+        repository.markPaused(id)
+
+        repository.resume(id)
+        val reallocated = repository.allocateFileName(id, BaseFileName("a.mp3"))
+
+        assertEquals("a.mp3", reallocated)
+    }
+
+    @Test
     fun `releaseFileName frees a reservation after file creation fails`() = runTest {
         val repository = repository()
         val id = dao.insert(entity(status = TaskStatus.Downloading))

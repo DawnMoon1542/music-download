@@ -40,7 +40,7 @@ import kotlinx.coroutines.withContext
  * 入队与文件名分配共享同一把仓库级 [Mutex]。文件名分配除查询数据库外，还会把本次已分配的
  * 名称按任务记入 [reservedFileNames]：名称在 [attachFile]/[markCompleted] 落库前不会出现在
  * 数据库里，只查询数据库会让并发分配拿到同一个名称。预留与任务绑定，在任务进入终态、
- * 重试或删除时释放，避免失败/取消的任务永久占用名称。
+ * 暂停、重试或删除时释放，避免失败/取消/暂停的任务永久占用名称。
  */
 class DefaultTaskRepository(
     private val dao: DownloadTaskDao,
@@ -54,7 +54,7 @@ class DefaultTaskRepository(
 
     /**
      * 已分配但尚未落库的文件名及其所属任务，受 [mutex] 保护。
-     * 落库后即释放，由数据库继续负责去重；任务进入终态、重试或被删除时也会释放，
+     * 落库后即释放，由数据库继续负责去重；任务进入终态、暂停、重试或被删除时也会释放，
      * 因此进程内的预留数量不会随失败次数无界增长。
      */
     private val reservedFileNames = mutableMapOf<String, Long>()
@@ -260,6 +260,9 @@ class DefaultTaskRepository(
 
     override suspend fun markPaused(id: Long) {
         transition(id, TaskStatus.Paused)
+        // 暂停的任务稍后会重新进入下载并可能再次分配名称；若不释放，isNameAvailable
+        // 会把该任务自己的旧预留当作占用，恢复后得到无实际冲突的 " (1)" 名称。
+        releaseFileName(id)
     }
 
     override suspend fun markCancelled(id: Long) {
