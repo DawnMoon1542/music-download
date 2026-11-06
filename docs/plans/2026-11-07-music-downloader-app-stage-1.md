@@ -28,7 +28,7 @@
 ### Group 1：工程骨架
 
 - [x] Task 1-1 — 清理模板与冒烟代码，建立空 Compose Activity、主题与 Application
-- [ ] Task 1-2 — 领域基础类型与音质/格式规则
+- [x] Task 1-2 — 领域基础类型与音质/格式规则
 - [ ] Task 1-3 — 任务状态机
 
 ### Group 2：纯领域逻辑
