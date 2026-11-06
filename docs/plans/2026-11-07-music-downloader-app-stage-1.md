@@ -39,7 +39,7 @@
 
 ### Group 3：数据层
 
-- [ ] Task 3-1 — Room 实体、DAO、数据库与 schema 导出
+- [x] Task 3-1 — Room 实体、DAO、数据库与 schema 导出
 - [ ] Task 3-2 — RoomQuotaStore 与 DataStoreSettings
 
 ### Group 4：网络层
