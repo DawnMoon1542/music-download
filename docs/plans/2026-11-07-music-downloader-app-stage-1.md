@@ -53,6 +53,8 @@
 
 - [x] Task 5-1 — DefaultTaskRepository 入队、去重、状态写入与文件名分配
 - [x] Task 5-2 — AppContainer、AppDependencies、Application 与启动恢复
+- [x] Task 1-修复1：配置 ChKSz API 客户端超时
+- [ ] Task 1-修复2：修复暂停后文件名预留泄漏
 
 ---
 
@@ -594,3 +596,75 @@ DAO 测试通过，`app/schemas/com.dawnmoon.music_download.data.local.DownloadD
 #### Step 3：验证与整理
 
 运行计划头部的构建、单元测试、仪器测试与 `lintDebug`，确认通过；安装启动无崩溃。
+
+---
+
+### Task 1-修复1：配置 ChKSz API 客户端超时
+
+**依赖：** Task 5-2
+
+**文件：**
+- 修改：`app/src/main/java/com/dawnmoon/music_download/AppContainer.kt`
+- 修改：`app/src/androidTest/java/com/dawnmoon/music_download/AppContainerTest.kt`
+
+**提交信息：**
+
+`fix: 配置 ChKSz API 客户端超时`
+
+AppContainer 目前使用无参 `OkHttpClient()`，实际超时为 OkHttp 默认 10s 连接/读/写且无整体超时，不符合 Stage 1 设计要求的连接 15s、读 30s、写 30s、整体 60s，慢网络下 ChkszApi 与短链解析会提前失败。改为显式构建共享客户端并区分 API 调用与短链解析的超时策略，不改变 `DefaultChkszApi` 的公开接口。
+
+#### Step 1：编写失败测试（仪器测试）
+
+在 `AppContainerTest` 中通过 `@VisibleForTesting internal` 暴露的 API client 断言各超时值：
+
+- `connectTimeoutMillis == 15_000`、`readTimeoutMillis == 30_000`、`writeTimeoutMillis == 30_000`。
+- `callTimeoutMillis == 60_000`（当前无参客户端为 0，测试失败）。
+- 重复读取同一容器的 API client 返回同一实例，确认容器内没有创建多个客户端。
+
+运行仪器测试，确认编译失败。
+
+#### Step 2：实现最终行为
+
+在 `AppContainer` 中导入 `java.util.concurrent.TimeUnit`，显式构建客户端：
+
+- 基础 client：`connectTimeout(15, TimeUnit.SECONDS)`、`readTimeout(30, TimeUnit.SECONDS)`、`writeTimeout(30, TimeUnit.SECONDS)`，不设 `callTimeout`。
+- 供 `DefaultChkszApi` 使用的 API client：在基础 client 上 `newBuilder().callTimeout(60, TimeUnit.SECONDS)`；以 `@VisibleForTesting internal` 暴露以便回归断言。
+- `api` 使用 API client；`HttpShortLinkResolver` 使用基础 client，避免短链解析被 60s 整体预算拖长。
+- 带 60s `callTimeout` 的实例不留给 Stage 2 的大文件下载复用，下载层应使用独立超时策略。
+
+#### Step 3：验证与整理
+
+`AppContainerTest` 通过；运行计划头部的单元测试、仪器测试与 `lintDebug`，确认 `DefaultChkszApi` 的公开接口与既有调用方未受影响。
+
+---
+
+### Task 1-修复2：修复暂停后文件名预留泄漏
+
+**依赖：** Task 5-1
+
+**文件：**
+- 修改：`app/src/main/java/com/dawnmoon/music_download/data/repository/DefaultTaskRepository.kt`
+- 测试：`app/src/test/java/com/dawnmoon/music_download/data/DefaultTaskRepositoryTest.kt`
+
+**提交信息：**
+
+`fix: 修复暂停后文件名预留泄漏`
+
+DefaultTaskRepository 使用 `reservedFileNames` 防止并发分配同一名称，但 `markPaused` 只迁移状态，不释放该任务的未落库预留；`allocateFileName` 的 `isNameAvailable` 又把同一任务自己的预留视为占用。Stage 2 在 `allocateFileName` 成功后、`attachFile` 之前被暂停再继续时，会再次分配并得到无实际冲突的 " (1)" 名称，旧预留继续占用原名，违反“仅重名时加序号”的规则。
+
+#### Step 1：编写失败测试
+
+在 `DefaultTaskRepositoryTest` 中补充：
+
+- 任务 A 处于 Downloading，`allocateFileName(A, a.mp3)` 得到 `a.mp3`；`markPaused(A)` 后让任务 B 分配 `a.mp3`，应得到 `a.mp3`，证明 A 的预留已释放。
+- 任务 A 分配 `a.mp3` 后 `markPaused(A)`，再 `resume(A)` 后由 A 重新分配 `a.mp3`，应仍得到 `a.mp3` 而非 `a (1).mp3`。
+
+运行测试，确认第一个用例得到 `a (1).mp3` 而失败。
+
+#### Step 2：实现最终行为
+
+`markPaused` 在成功 `transition` 到 Paused 后调用 `releaseFileName(id)`；`pauseAll` 经由 `markPaused` 自动覆盖该路径。这样数据库中的 `fileName` 仍是唯一的名称占用事实来源，已 `attachFile` 的文件因预留早已释放而不受影响。同步更新类 KDoc 与 `reservedFileNames` KDoc 中的释放触发列表，加入“暂停”。
+
+#### Step 3：验证与整理
+
+`DefaultTaskRepositoryTest` 通过；运行计划头部的单元测试与 `lintDebug`，确认并发分配、取消、失败、重试与删除路径的预留释放行为未回退。

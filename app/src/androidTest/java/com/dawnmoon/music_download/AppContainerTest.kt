@@ -48,6 +48,27 @@ class AppContainerTest {
         assertSame(container.quotaStore, container.quotaStore)
         assertSame(container.apiCaller, container.apiCaller)
         assertSame(container.qualityResolver, container.qualityResolver)
+        assertSame(container.apiHttpClient, container.apiHttpClient)
+    }
+
+    @Test
+    fun apiClientUsesConfiguredSocketTimeoutsForSlowNetworks() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val container = AppContainer(context)
+
+        val client = container.apiHttpClient
+
+        assertEquals("连接超时应为 15s", 15_000, client.connectTimeoutMillis)
+        assertEquals("读超时应为 30s", 30_000, client.readTimeoutMillis)
+        assertEquals("写超时应为 30s", 30_000, client.writeTimeoutMillis)
+    }
+
+    @Test
+    fun apiClientLimitsWholeCallToSixtySeconds() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val container = AppContainer(context)
+
+        assertEquals(60_000, container.apiHttpClient.callTimeoutMillis)
     }
 
     @Test

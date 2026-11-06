@@ -1,6 +1,7 @@
 package com.dawnmoon.music_download
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
@@ -24,6 +25,7 @@ import com.dawnmoon.music_download.data.repository.RoomQuotaStore
 import com.dawnmoon.music_download.data.repository.TaskRepository
 import com.dawnmoon.music_download.domain.DefaultQualityResolver
 import com.dawnmoon.music_download.domain.TrackResolver
+import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
@@ -40,7 +42,26 @@ class AppContainer(context: Context) : AppDependencies {
 
     private val clock: AppClock by lazy { SystemAppClock() }
 
-    private val okHttpClient: OkHttpClient by lazy { OkHttpClient() }
+    /**
+     * 短链解析与 API 调用共享的连接池配置；不设整体超时，由调用场景自行限定。
+     *
+     * 无参 [OkHttpClient] 的默认连接/读/写均为 10s，慢网络下会早于设计预算失败。
+     */
+    private val okHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /** 供 [api] 使用：在共享客户端上追加 60s 整体超时预算；不复用于下载等大文件场景。 */
+    @VisibleForTesting
+    internal val apiHttpClient: OkHttpClient by lazy {
+        okHttpClient.newBuilder()
+            .callTimeout(60, TimeUnit.SECONDS)
+            .build()
+    }
 
     private val json: Json by lazy { Json { ignoreUnknownKeys = true } }
 
@@ -58,7 +79,7 @@ class AppContainer(context: Context) : AppDependencies {
 
     override val quotaStore: QuotaStore by lazy { RoomQuotaStore(database.quotaDao(), clock) }
 
-    override val api: ChkszApi by lazy { DefaultChkszApi(okHttpClient, json = json) }
+    override val api: ChkszApi by lazy { DefaultChkszApi(apiHttpClient, json = json) }
 
     override val rateLimiter: RateLimiter by lazy {
         RateLimiter(clock = clock::elapsedRealtime)
