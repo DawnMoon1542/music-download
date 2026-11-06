@@ -6,6 +6,7 @@ import com.dawnmoon.music_download.data.remote.ApiResponse
 import com.dawnmoon.music_download.data.repository.AppSettings
 import com.dawnmoon.music_download.data.repository.TaskRepository
 import com.dawnmoon.music_download.domain.FileNameBuilder
+import com.dawnmoon.music_download.domain.TaskTransitions
 import com.dawnmoon.music_download.domain.TrackResolver
 import com.dawnmoon.music_download.domain.model.AudioFormat
 import com.dawnmoon.music_download.domain.model.DownloadTask
@@ -15,9 +16,15 @@ import com.dawnmoon.music_download.domain.model.SongId
 import com.dawnmoon.music_download.domain.model.TaskStatus
 import java.io.IOException
 import java.io.InputStream
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -38,6 +45,19 @@ sealed interface WorkerResult {
     data object Cancelled : WorkerResult
 
     data class Failed(val kind: FailureKind) : WorkerResult
+}
+
+/**
+ * 引擎取消下载 Job 时携带的用户意图。
+ *
+ * 两者都表现为协程取消，只有取消原因能区分收尾方式：暂停保留 pending 文件与已写字节，
+ * 取消删除 pending 文件并把任务记为 `Cancelled`。作为 [CancellationException] 的子类型
+ * 通过 `Job.cancel(signal)` 传入，下载器在 `NonCancellable` 收尾中读取。
+ */
+sealed class CancellationSignal : CancellationException() {
+    data object Pause : CancellationSignal()
+
+    data object Cancel : CancellationSignal()
 }
 
 /**
@@ -62,7 +82,11 @@ class DefaultDownloadWorker(
     private val sleeper: suspend (Long) -> Unit = { delay(it) },
 ) : TaskDownloader {
 
-    override suspend fun execute(taskId: Long): WorkerResult {
+    @OptIn(InternalCoroutinesApi::class)
+    override suspend fun execute(taskId: Long): WorkerResult = try {
+        // 读取任务与迁移到 Downloading 同样是真实仓库的挂起点。若取消发生在这两处而不纳入
+        // 收尾，暂停/取消请求会被直接抛出的 CancellationException 吞掉：任务可能停在 Waiting，
+        // 也可能在状态已落库后停在 Downloading（Downloading->Waiting 非法，会话内无法恢复）。
         val task = repo.byId(taskId) ?: return WorkerResult.Failed(FailureKind.NotFound)
         // 本实现只接受新任务首下；Paused 任务须先由仓库层回到 Waiting 才能续传。
         if (task.status != TaskStatus.Waiting) {
@@ -75,12 +99,63 @@ class DefaultDownloadWorker(
             return fail(taskId, FailureKind.StreamExpired, "任务缺少直链")
         }
 
-        return try {
-            val prepared = prepareFile(task)
-            download(task, prepared.file, prepared.start)
-        } catch (error: IOException) {
-            fail(taskId, FailureKind.Network, error.message ?: "网络中断")
+        val prepared = prepareFile(task)
+        download(task, prepared.file, prepared.start)
+    } catch (error: CancellationException) {
+        // 协程取消后仍须把任务迁移到 Paused/Cancelled，并删除（或保留）pending 文件；
+        // 收尾中的挂起点必须在 NonCancellable 中执行，否则第一个挂起点就会再次抛出取消。
+        val signal = error as? CancellationSignal
+            ?: currentCoroutineContext().job.getCancellationException() as? CancellationSignal
+        finishCancelled(taskId, signal)
+    } catch (error: IOException) {
+        fail(taskId, FailureKind.Network, error.message ?: "网络中断")
+    }
+
+    /**
+     * 协程被取消后的收尾：按 [signal] 区分暂停与取消。
+     *
+     * 暂停保留 pending 文件与已写字节，供之后续传；取消删除 pending 文件并保留任务行，
+     * 让用户仍能看到该记录。无法识别的取消原因（例如作用域整体结束）按暂停处理，
+     * 因为保留进度比丢弃更安全。
+     *
+     * 取消可能在终态写入已提交、但挂起点（如 `markCompleted` 之后的 `releaseFileName`
+     * 仓库锁）尚未返回时才送达。此时任务行已是 Completed/Failed，既不能再迁移，也不能
+     * 按 Cancelled 删除文件：那会误删已发布的正式媒体文件。因此收尾必须以任务行当前
+     * 状态为准，先判断迁移是否合法，非法时直接返回既有结局。
+     */
+    private suspend fun finishCancelled(
+        taskId: Long,
+        signal: CancellationSignal?,
+    ): WorkerResult = withContext(NonCancellable) {
+        val task = repo.byId(taskId)
+            ?: return@withContext WorkerResult.Failed(FailureKind.NotFound)
+        if (signal == CancellationSignal.Cancel) {
+            if (!TaskTransitions.isAllowed(task.status, TaskStatus.Cancelled)) {
+                return@withContext outcomeOf(task)
+            }
+            val mediaStoreId = task.mediaStoreId
+            val fileName = task.fileName
+            if (mediaStoreId != null && fileName != null) {
+                fileStore.delete(CreatedFile(mediaStoreId = mediaStoreId, displayName = fileName))
+            }
+            repo.markCancelled(taskId)
+            WorkerResult.Cancelled
+        } else {
+            if (!TaskTransitions.isAllowed(task.status, TaskStatus.Paused)) {
+                return@withContext outcomeOf(task)
+            }
+            repo.markPaused(taskId)
+            WorkerResult.Paused
         }
+    }
+
+    /** 无法再按取消/暂停迁移时，任务当前状态对应的执行结局。 */
+    private fun outcomeOf(task: DownloadTask): WorkerResult = when (task.status) {
+        TaskStatus.Completed -> WorkerResult.Completed
+        TaskStatus.Paused -> WorkerResult.Paused
+        TaskStatus.Cancelled -> WorkerResult.Cancelled
+        TaskStatus.Failed -> WorkerResult.Failed(task.failureKind ?: FailureKind.Unknown)
+        else -> WorkerResult.Failed(FailureKind.Unknown)
     }
 
     /** 续传起点：已有文件的实际字节数；没有可复用文件时为 0。 */
@@ -183,6 +258,7 @@ class DefaultDownloadWorker(
      * 每次循环对应一次 HTTP 请求；请求之间共享 [start]（已落盘字节）与当前任务行，
      * 换链成功后更新这两者后继续，瞬时失败则在退避后沿用最新起点重试。
      */
+    @OptIn(InternalCoroutinesApi::class)
     private suspend fun download(
         task: DownloadTask,
         initialFile: CreatedFile,
@@ -233,9 +309,18 @@ class DefaultDownloadWorker(
             val streamUrl = workingTask.streamUrl
                 ?: return@withContext fail(workingTask.id, FailureKind.StreamExpired, "任务缺少直链")
 
+            val call = client.newCall(buildRequest(streamUrl, start, workingTask.etag))
+            // 协程取消不会打断 OkHttp 的阻塞读；在取消开始时主动 cancel Call 关闭连接，
+            // 让 execute/read 立即抛出 IOException，收尾逻辑才能在每个 1 秒内结束。
+            val cancelHandle = currentCoroutineContext().job
+                .invokeOnCompletion(onCancelling = true) { call.cancel() }
+
             val response = try {
-                client.newCall(buildRequest(streamUrl, start, workingTask.etag)).execute()
+                call.execute()
             } catch (error: IOException) {
+                cancelHandle.dispose()
+                // 取消触发的 IOException 必须按取消收尾，不能当成可重试的网络错误。
+                currentCoroutineContext().ensureActive()
                 resync()
                 if (transientAttempts >= MAX_TRANSIENT_RETRIES) {
                     return@withContext fail(
@@ -310,13 +395,24 @@ class DefaultDownloadWorker(
                         }
                     }
                 }
+            } catch (error: StorageWriteFailure) {
+                // 本地写盘失败（磁盘满等）重试也不会好转，删除不可用条目并直接失败。
+                return@withContext failStorage(
+                    taskId = workingTask.id,
+                    file = file,
+                    message = error.message ?: "本地写入失败",
+                )
             } catch (error: IOException) {
+                // 取消触发的读中断必须按取消收尾，不能当成可重试的网络错误。
+                currentCoroutineContext().ensureActive()
                 // 写入中途断流时以实际落盘字节为新的续传起点；已完成的结果不受关闭异常影响。
                 val alreadyDone = decision is Decision.Done
                 if (!alreadyDone) {
                     resync()
                     decision = Decision.RetryTransient
                 }
+            } finally {
+                cancelHandle.dispose()
             }
 
             when (val current = decision) {
@@ -348,6 +444,14 @@ class DefaultDownloadWorker(
 
         data class Done(val result: WorkerResult) : Decision
     }
+
+    /**
+     * 本地存储容量不足（磁盘满）。
+     *
+     * 用独立类型把这类写入侧 [IOException] 与网络读取侧区分开：前者不可重试，
+     * 也不应被报成 `Network`/`ServiceUnavailable`。
+     */
+    private class StorageWriteFailure(cause: IOException) : IOException(cause.message, cause)
 
     /** 换链结果；[Updated] 携带刷新后的任务行、文件与续传起点。 */
     private sealed interface RefreshResult {
@@ -545,23 +649,47 @@ class DefaultDownloadWorker(
         from: Long,
     ): Long {
         val reporter = ProgressReporter(clock) { bytes -> repo.updateProgress(taskId, bytes) }
-        val output = if (append) fileStore.openAppend(file) else fileStore.openTruncate(file)
+        val output = try {
+            if (append) fileStore.openAppend(file) else fileStore.openTruncate(file)
+        } catch (error: IOException) {
+            if (isStorageFailure(error)) throw StorageWriteFailure(error)
+            throw error
+        }
         val buffer = ByteArray(BUFFER_SIZE)
         var total = from
 
         output.use { out ->
             while (true) {
+                // 读取来自网络，保留原始 IOException，交由瞬时重试处理。
                 val read = stream.read(buffer)
                 if (read < 0) break
-                out.write(buffer, 0, read)
+                try {
+                    out.write(buffer, 0, read)
+                } catch (error: IOException) {
+                    // 只有磁盘空间不足这类本地存储错误才终止；其余写入异常沿用瞬时重试。
+                    if (isStorageFailure(error)) throw StorageWriteFailure(error)
+                    throw error
+                }
                 total += read
                 reporter.report(total)
             }
-            out.flush()
+            try {
+                out.flush()
+            } catch (error: IOException) {
+                if (isStorageFailure(error)) throw StorageWriteFailure(error)
+                throw error
+            }
         }
 
         reporter.finish(total)
         return total
+    }
+
+    /** 是否为本地存储容量/写入不可用错误（磁盘满），这类错误重试无意义。 */
+    private fun isStorageFailure(error: IOException): Boolean {
+        val message = error.message ?: return false
+        return message.contains("ENOSPC", ignoreCase = true) ||
+            message.contains("No space left on device", ignoreCase = true)
     }
 
     /** 校验实际落盘大小与 MD5；通过则发布文件，否则删除 pending 条目并标记失败。 */
@@ -616,6 +744,17 @@ class DefaultDownloadWorker(
     private suspend fun fail(taskId: Long, kind: FailureKind, message: String): WorkerResult {
         repo.markFailed(taskId, kind, message)
         return WorkerResult.Failed(kind)
+    }
+
+    /** 本地写盘失败：删除不可用条目并记为 [FailureKind.Storage]，不进入网络重试。 */
+    private suspend fun failStorage(
+        taskId: Long,
+        file: CreatedFile,
+        message: String,
+    ): WorkerResult {
+        fileStore.delete(file)
+        repo.markFailed(taskId, FailureKind.Storage, message)
+        return WorkerResult.Failed(FailureKind.Storage)
     }
 
     private companion object {
