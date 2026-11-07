@@ -12,6 +12,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.dawnmoon.music_download.domain.model.MusicQuality
@@ -139,7 +140,7 @@ class AccessibilityTest {
             .assert(hasContentDescription("显示 Key"))
             .assertTouchHeightIsEqualTo(48.dp)
         composeRule.onNodeWithTag("save_key").assertTouchHeightIsEqualTo(48.dp)
-        composeRule.onNodeWithTag("get_key_link").assertTouchHeightIsEqualTo(48.dp)
+        composeRule.onNodeWithTag("open_credits").performScrollTo().assertHeightIsAtLeast(48.dp)
     }
 
     private fun hasNonEmptyClickLabel(): SemanticsMatcher = SemanticsMatcher(

@@ -10,7 +10,7 @@
     <string name="tasks_title">下载任务</string>
     <string name="empty_tasks">暂无下载任务，粘贴链接开始</string>
     <string name="empty_tasks_hint">支持一次粘贴多条链接或整段分享文案</string>
-    <string name="task_search_placeholder">搜索曲名、艺术家、文件名或链接</string>
+    <string name="task_search_placeholder">搜索曲名、艺术家</string>
     <string name="empty_task_search">没有匹配的任务</string>
     <string name="status_group_failed">异常 %1$d</string>
     <string name="status_group_active">进行中 %1$d</string>
@@ -103,7 +103,6 @@
     <string name="settings_api_url_label">API 地址</string>
     <string name="settings_api_url_placeholder">https://api.example.com</string>
     <string name="settings_api_key_label">API Key</string>
-    <string name="settings_get_key_link">前往 API 网站 ↗</string>
     <string name="settings_key_saved">已保存：%1$s · %2$s</string>
     <string name="settings_url_invalid_format">API 地址格式不正确，需以 http:// 或 https:// 开头</string>
     <string name="settings_key_saving">验证中</string>
@@ -129,6 +128,16 @@
     <string name="settings_section_history">历史</string>
     <string name="settings_section_about">关于</string>
     <string name="settings_about_version_label">版本</string>
-    <string name="settings_about_api_label">接口地址</string>
-    <string name="settings_api_not_configured">未配置</string>
+    <string name="settings_about_credits">特别鸣谢</string>
+    <string name="settings_about_credits_supporting">ChKSz API 的作者与赞助者</string>
+
+    <!-- 特别鸣谢 -->
+    <string name="credits_title">特别鸣谢</string>
+    <string name="credits_intro">本应用通过 ChKSz API 解析歌曲。下面的名字来自项目贡献者页面，感谢他们让服务得以运行。</string>
+    <string name="credits_source">查看项目贡献者</string>
+    <string name="credits_source_url" translatable="false">https://api.chksz.com/#contributors</string>
+    <string name="credits_open_profile">打开 %1$s 的主页</string>
+    <string name="credits_badge_maintainer">维护</string>
+    <string name="credits_badge_sponsor">赞助</string>
+    <string name="credits_badge_provider">上游</string>
 </resources>

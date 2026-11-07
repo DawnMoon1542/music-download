@@ -17,6 +17,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -90,15 +91,16 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun theSiteLinkAppearsOnlyAfterAValidBaseUrlIsEntered() {
+    fun openingCreditsShowsTheThanksPageAndBackReturnsToSettings() {
         val viewModel = createViewModel()
         setScreen(viewModel)
 
-        composeRule.onNodeWithTag("get_key_link").assertDoesNotExist()
+        composeRule.onNodeWithTag("open_credits").performScrollTo().performClick()
+        composeRule.onNodeWithTag("credits_screen").assertIsDisplayed()
 
-        composeRule.onNodeWithTag("api_url_input").performTextReplacement("https://api.test")
-
-        composeRule.onNodeWithTag("get_key_link").assertIsDisplayed()
+        composeRule.onNodeWithTag("credits_back").performClick()
+        composeRule.onNodeWithTag("open_credits").assertExists()
+        composeRule.onNodeWithTag("credits_screen").assertDoesNotExist()
     }
 
     @Test

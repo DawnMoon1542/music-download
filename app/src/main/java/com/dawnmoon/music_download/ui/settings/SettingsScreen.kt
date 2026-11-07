@@ -1,5 +1,6 @@
 package com.dawnmoon.music_download.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -24,13 +25,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Link
@@ -57,7 +59,6 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,6 +66,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,7 +75,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -83,7 +84,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.dawnmoon.music_download.BuildConfig
 import com.dawnmoon.music_download.R
-import com.dawnmoon.music_download.data.remote.ApiBaseUrl
 import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.ThemeMode
 import com.dawnmoon.music_download.ui.history.ClearHistoryDialog
@@ -120,6 +120,13 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     focusKey: Boolean = false,
 ) {
+    var showCredits by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = showCredits) { showCredits = false }
+    if (showCredits) {
+        CreditsScreen(onBack = { showCredits = false })
+        return
+    }
+
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
         modifier = modifier
@@ -157,7 +164,7 @@ fun SettingsScreen(
             DownloadGroup(state = state, callbacks = callbacks)
             AppearanceGroup(state = state, callbacks = callbacks)
             HistoryGroup(callbacks = callbacks)
-            AboutGroup(state = state)
+            AboutGroup(onOpenCredits = { showCredits = true })
             Spacer(Modifier.size(16.dp))
         }
     }
@@ -170,7 +177,6 @@ private fun ApiKeyGroup(
     focusKey: Boolean,
 ) {
     var visible by remember { mutableStateOf(false) }
-    val uriHandler = LocalUriHandler.current
     // 切换可见性会重建输入框以刷新 Password 语义，重建后把焦点还回 Key 输入框。
     var restoreFocus by remember { mutableStateOf(false) }
     val keyFocusRequester = remember { FocusRequester() }
@@ -305,42 +311,20 @@ private fun ApiKeyGroup(
             }
 
             val quota = state.quota
-            // 网站入口来自用户填写的地址，应用内不再内置任何服务域名。
-            val siteUrl = ApiBaseUrl.normalize(state.apiUrlDraft) ?: state.savedApiUrl
-            AnimatedVisibility(visible = quota != null || siteUrl != null) {
+            AnimatedVisibility(visible = quota != null) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (quota != null) {
-                            val unknown = stringResource(R.string.quota_unknown)
-                            Text(
-                                text = stringResource(
-                                    R.string.quota_summary,
-                                    quota.freeRemaining?.toString() ?: unknown,
-                                    quota.paidRemaining?.toString() ?: unknown,
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(Modifier.weight(1f))
-                        if (siteUrl != null) {
-                            TextButton(
-                                onClick = { uriHandler.openUri(siteUrl) },
-                                modifier = Modifier.testTag("get_key_link"),
-                            ) {
-                                Text(stringResource(R.string.settings_get_key_link))
-                                Spacer(Modifier.width(4.dp))
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
-                        }
+                    if (quota != null) {
+                        val unknown = stringResource(R.string.quota_unknown)
+                        Text(
+                            text = stringResource(
+                                R.string.quota_summary,
+                                quota.freeRemaining?.toString() ?: unknown,
+                                quota.paidRemaining?.toString() ?: unknown,
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -501,17 +485,31 @@ private fun HistoryGroup(callbacks: SettingsCallbacks) {
 }
 
 @Composable
-private fun AboutGroup(state: SettingsViewModel.State) {
+private fun AboutGroup(onOpenCredits: () -> Unit) {
     SettingsGroup(title = stringResource(R.string.settings_section_about)) {
         AboutItem(
             icon = Icons.Outlined.Info,
             label = stringResource(R.string.settings_about_version_label),
             value = BuildConfig.VERSION_NAME,
         )
-        AboutItem(
-            icon = Icons.Outlined.Link,
-            label = stringResource(R.string.settings_about_api_label),
-            value = state.savedApiUrl ?: stringResource(R.string.settings_api_not_configured),
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.settings_about_credits)) },
+            supportingContent = {
+                Text(stringResource(R.string.settings_about_credits_supporting))
+            },
+            leadingContent = {
+                Icon(Icons.Outlined.FavoriteBorder, contentDescription = null)
+            },
+            trailingContent = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                )
+            },
+            colors = groupListItemColors(),
+            modifier = Modifier
+                .clickable(onClick = onOpenCredits)
+                .testTag("open_credits"),
         )
     }
 }
