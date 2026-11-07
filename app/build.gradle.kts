@@ -28,8 +28,10 @@ android {
 
     buildTypes {
         release {
+            // R8 会去掉未使用的代码。未开启时 material-icons-extended 会把整套图标打进 dex，
+            // 再叠加 minSdk 29 默认不压缩 dex，安装包会到约 50MB。
             optimization {
-                enable = false
+                enable = true
             }
         }
     }
