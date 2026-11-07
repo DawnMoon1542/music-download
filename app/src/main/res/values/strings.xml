@@ -86,4 +86,33 @@
     <string name="settings_content_description">设置</string>
     <string name="back_content_description">返回</string>
     <string name="settings_placeholder">设置项将在后续版本提供</string>
+
+    <!-- 设置：API Key -->
+    <string name="settings_section_api_key">API Key</string>
+    <string name="settings_api_key_label">API Key</string>
+    <string name="settings_get_key_link">获取 Key ↗ (https://api.chksz.com/login)</string>
+    <string name="settings_key_saved">已保存：%1$s</string>
+    <string name="settings_key_saving">验证中</string>
+    <string name="settings_key_save_and_validate">保存并验证</string>
+    <string name="settings_key_show">显示 Key</string>
+    <string name="settings_key_hide">隐藏 Key</string>
+    <string name="settings_key_status_idle">未验证</string>
+    <string name="settings_key_status_validating">验证中</string>
+    <string name="settings_key_status_valid">验证通过</string>
+    <string name="settings_key_status_warning">警告：%1$s</string>
+
+    <!-- 设置：下载与外观 -->
+    <string name="settings_section_download">下载</string>
+    <string name="settings_default_quality">默认音质</string>
+    <string name="settings_concurrency">同时下载数</string>
+    <string name="settings_section_appearance">外观</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+
+    <!-- 设置：历史与关于 -->
+    <string name="settings_section_history">历史</string>
+    <string name="settings_section_about">关于</string>
+    <string name="settings_about_version">版本 %1$s</string>
+    <string name="settings_about_api">接口 %1$s</string>
 </resources>

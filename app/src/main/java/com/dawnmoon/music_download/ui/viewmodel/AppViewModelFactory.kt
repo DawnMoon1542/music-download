@@ -8,12 +8,13 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import com.dawnmoon.music_download.AppDependencies
 import com.dawnmoon.music_download.core.AppClock
 import com.dawnmoon.music_download.core.SystemAppClock
+import com.dawnmoon.music_download.ui.history.HistoryActions
 
 /**
  * 页面 ViewModel 的统一工厂。
  *
- * 工厂持有进程级依赖容器；[appContext] 供需要读取资源的 ViewModel 使用。通过
- * [ViewModelProvider] 创建时也可从 [CreationExtras] 的 [APPLICATION_KEY] 取得 Application，
+ * 工厂持有进程级依赖容器；[appContext] 供需要读取资源或构造平台 Intent 的 ViewModel 使用。
+ * 通过 [ViewModelProvider] 创建时也可从 [CreationExtras] 的 [APPLICATION_KEY] 取得 Application，
  * 这样调用方不必额外传入上下文。
  */
 class AppViewModelFactory(
@@ -43,6 +44,26 @@ class AppViewModelFactory(
                 quotaStore = dependencies.quotaStore,
                 appContext = requiredContext,
                 clock = clock,
+            ) as T
+        }
+        if (modelClass.isAssignableFrom(SettingsViewModel::class.java)) {
+            val requiredContext = requireNotNull(context) {
+                "SettingsViewModel requires a Context; pass it to AppViewModelFactory " +
+                    "or provide APPLICATION_KEY in CreationExtras"
+            }
+            @Suppress("UNCHECKED_CAST")
+            return SettingsViewModel(
+                settings = dependencies.settings,
+                keyValidator = dependencies.keyValidator,
+                quotaStore = dependencies.quotaStore,
+                tasks = dependencies.repository,
+                // 与工作台共用 HistoryActions 实现，两个入口的清空历史行为保持一致。
+                historyActions = HistoryActions(
+                    repo = dependencies.repository,
+                    fileStore = dependencies.fileStore,
+                    engine = dependencies.downloadController,
+                    appContext = requiredContext,
+                ),
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
