@@ -19,8 +19,10 @@ enum class TaskStatusGroup {
 /**
  * 工作台完整界面状态。
  *
- * [tasks] 是全部任务按 [TaskStatusGroup] 优先级、再按创建时间从新到旧排序后，
- * 经 [query] 过滤的结果；[statusCounts] 统计过滤前的数量，供列表标题展示。
+ * [tasks] 是全部任务按 [TaskStatusGroup] 优先级排序后，经 [query] 过滤的结果。
+ * 进行中保持加入顺序，下载中整段排在待解析之前；已完成排在这些任务之后。
+ * 异常、已取消、已完成各组内仍按创建时间从新到旧。
+ * [statusCounts] 统计过滤前的数量，供列表标题展示。
  */
 data class WorkbenchUiState(
     val input: String,
@@ -62,6 +64,11 @@ data class TaskUiModel(
     val fileName: String?,
     val createdAt: Long,
     val completedAt: Long?,
+    /**
+     * 同一 [statusGroup] 内的状态优先级，数值小的排在前面。
+     * 待解析（排队）低于下载中；其余状态与下载中同级。
+     */
+    val statusSortRank: Int = 0,
     val canPause: Boolean,
     val canResume: Boolean,
     val canCancel: Boolean,

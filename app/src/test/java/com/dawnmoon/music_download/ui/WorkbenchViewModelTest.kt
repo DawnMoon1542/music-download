@@ -133,7 +133,7 @@ class WorkbenchViewModelTest {
                 task(id = 3L, status = TaskStatus.Failed, createdAt = 200),
                 task(id = 4L, status = TaskStatus.Paused, createdAt = 300),
                 task(id = 5L, status = TaskStatus.Failed, createdAt = 400),
-                task(id = 6L, status = TaskStatus.Queued, createdAt = 50),
+                task(id = 6L, status = TaskStatus.Queued, createdAt = 350),
                 task(id = 7L, status = TaskStatus.Cancelled, createdAt = 600),
             )
             repo.completed.value = listOf(
@@ -144,8 +144,9 @@ class WorkbenchViewModelTest {
             dispatcher.scheduler.runCurrent()
 
             val state = viewModel.state.value
-            // 异常 → 进行中（含暂停、排队）→ 已取消 → 已完成；同组内创建时间新的在前。
-            assertEquals(listOf(5L, 3L, 4L, 2L, 6L, 7L, 1L, 9L, 8L), state.tasks.map { it.id })
+            // 异常、已取消、已完成组内创建时间新的在前。
+            // 进行中保持加入顺序，下载中先于待解析。
+            assertEquals(listOf(5L, 3L, 2L, 4L, 6L, 7L, 1L, 9L, 8L), state.tasks.map { it.id })
             assertEquals(
                 mapOf(
                     TaskStatusGroup.Failed to 2,
@@ -155,6 +156,53 @@ class WorkbenchViewModelTest {
                 ),
                 state.statusCounts,
             )
+        }
+
+    @Test
+    fun `songs keep enqueue order with downloading ahead of pending and completed last`() =
+        runTest(dispatcher.scheduler) {
+            // 加入顺序是 A B D C E，而不是字母序。
+            val a = 1L
+            val b = 2L
+            val d = 3L
+            val c = 4L
+            val e = 5L
+            fun song(id: Long, status: TaskStatus) = task(id = id, status = status, createdAt = id)
+
+            repo.inProgress.value = listOf(c, a, e, d, b).map { song(it, TaskStatus.Queued) }
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+            assertEquals(listOf(a, b, d, c, e), viewModel.state.value.tasks.map { it.id })
+
+            repo.inProgress.value = listOf(
+                song(a, TaskStatus.Downloading),
+                song(b, TaskStatus.Queued),
+                song(d, TaskStatus.Queued),
+                song(c, TaskStatus.Queued),
+                song(e, TaskStatus.Queued),
+            )
+            dispatcher.scheduler.runCurrent()
+            assertEquals(listOf(a, b, d, c, e), viewModel.state.value.tasks.map { it.id })
+
+            repo.inProgress.value = listOf(
+                song(a, TaskStatus.Downloading),
+                song(b, TaskStatus.Downloading),
+                song(d, TaskStatus.Queued),
+                song(c, TaskStatus.Queued),
+                song(e, TaskStatus.Queued),
+            )
+            dispatcher.scheduler.runCurrent()
+            assertEquals(listOf(a, b, d, c, e), viewModel.state.value.tasks.map { it.id })
+
+            repo.inProgress.value = listOf(
+                song(b, TaskStatus.Downloading),
+                song(d, TaskStatus.Downloading),
+                song(c, TaskStatus.Queued),
+                song(e, TaskStatus.Queued),
+            )
+            repo.completed.value = listOf(song(a, TaskStatus.Completed))
+            dispatcher.scheduler.runCurrent()
+            assertEquals(listOf(b, d, c, e, a), viewModel.state.value.tasks.map { it.id })
         }
 
     @Test

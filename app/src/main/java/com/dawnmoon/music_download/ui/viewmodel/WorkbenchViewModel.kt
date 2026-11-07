@@ -425,6 +425,7 @@ class WorkbenchViewModel(
             fileName = fileName,
             createdAt = createdAt,
             completedAt = completedAt,
+            statusSortRank = status.statusSortRank(),
             canPause = status == TaskStatus.Downloading || status == TaskStatus.Resolving,
             canResume = status == TaskStatus.Paused,
             canCancel = status == TaskStatus.Queued ||
@@ -449,6 +450,9 @@ class WorkbenchViewModel(
         TaskStatus.Cancelled -> TaskStatusGroup.Cancelled
         TaskStatus.Completed -> TaskStatusGroup.Completed
     }
+
+    /** 待解析排在下载中之后；其余状态不单独插队。 */
+    private fun TaskStatus.statusSortRank(): Int = if (this == TaskStatus.Queued) QUEUED_SORT_RANK else 0
 
     private fun DownloadTask.statusLabel(): String = when (status) {
         TaskStatus.Queued -> text(R.string.status_queued)
@@ -520,10 +524,23 @@ class WorkbenchViewModel(
     private companion object {
         const val SPEED_SAMPLE_INTERVAL_MILLIS = 1_000L
         const val MILLIS_PER_SECOND = 1_000.0
+        const val QUEUED_SORT_RANK = 1
 
-        /** 先按状态分组优先级（异常、进行中、已取消、已完成），同组内创建时间新的在前。 */
-        val TASK_ORDER: Comparator<TaskUiModel> = compareBy<TaskUiModel> { it.statusGroup.ordinal }
-            .thenByDescending { it.createdAt }
+        /**
+         * 异常、已取消、已完成各自成组，组内创建时间新的在前。
+         * 进行中保持加入顺序：下载中整段在前，待解析（排队）在后，已完成另成一组排到最后。
+         */
+        val TASK_ORDER: Comparator<TaskUiModel> = Comparator { left, right ->
+            val group = left.statusGroup.ordinal.compareTo(right.statusGroup.ordinal)
+            if (group != 0) return@Comparator group
+            val rank = left.statusSortRank.compareTo(right.statusSortRank)
+            if (rank != 0) return@Comparator rank
+            if (left.statusGroup == TaskStatusGroup.Active) {
+                left.createdAt.compareTo(right.createdAt)
+            } else {
+                right.createdAt.compareTo(left.createdAt)
+            }
+        }
 
         val FAILURE_WITH_MESSAGE: Set<FailureKind> = setOf(
             FailureKind.Forbidden,
