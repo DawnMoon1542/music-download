@@ -43,13 +43,8 @@ data class SearchDataDto(
 data class SearchSongDto(
     val id: Long? = null,
     val name: String? = null,
-    val artists: List<SearchArtistDto> = emptyList(),
-)
-
-@Serializable
-data class SearchArtistDto(
-    val id: Long? = null,
-    val name: String? = null,
+    /** 多位艺术家以 `/` 分隔，例如 `The Kid LAROI/Justin Bieber`。 */
+    val artists: String? = null,
 )
 
 /** 错误响应只需 `msg` 原文；其余字段忽略。 */

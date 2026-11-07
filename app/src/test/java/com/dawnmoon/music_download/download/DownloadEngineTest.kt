@@ -1,5 +1,7 @@
 package com.dawnmoon.music_download.download
 
+import kotlinx.coroutines.flow.map
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.core.AppClock
 import com.dawnmoon.music_download.data.remote.ApiFailure
 import com.dawnmoon.music_download.data.remote.ApiResponse
@@ -41,6 +43,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+
+private const val TEST_API_BASE_URL = "https://api.test"
 
 /**
  * [DownloadEngine] 的队列、下载池与批量操作契约测试。
@@ -1464,14 +1468,15 @@ internal class EngineFakeSettings(initialConcurrency: Int) : AppSettings {
     val concurrency = MutableStateFlow(initialConcurrency)
     val key = MutableStateFlow<String?>("test-key")
 
-    override val apiKey: Flow<String?> = key
+    override val apiCredentials: Flow<ApiCredentials?> =
+        key.map { key -> key?.let { ApiCredentials(TEST_API_BASE_URL, it) } }
     override val defaultQuality: Flow<MusicQuality> = MutableStateFlow(MusicQuality.Exhigh)
     override val maxConcurrentDownloads: Flow<Int> = concurrency
     override val themeMode: Flow<ThemeMode> = MutableStateFlow(ThemeMode.System)
     override val notificationAsked: Flow<Boolean> = MutableStateFlow(false)
 
-    override suspend fun setApiKey(value: String) {
-        key.value = value
+    override suspend fun setApiCredentials(value: ApiCredentials) {
+        key.value = value.apiKey
     }
 
     override suspend fun setDefaultQuality(value: MusicQuality) = Unit
@@ -1498,13 +1503,13 @@ internal class EngineFakeResolver : TrackResolver {
     override suspend fun resolve(
         songId: SongId,
         requested: MusicQuality,
-        apiKey: String,
+        credentials: ApiCredentials,
     ): ApiResponse<ResolvedTrack> {
         requestedSongIds += songId.value
         active += 1
         maxActive = maxOf(maxActive, active)
         return try {
-            behavior(songId, requested, apiKey)
+            behavior(songId, requested, credentials.apiKey)
         } finally {
             active -= 1
         }

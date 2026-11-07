@@ -1,22 +1,48 @@
+# Android / Gradle
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-api_key.txt
+.gradle/
+build/
+**/build/
+.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
+*.dm
+output-metadata.json
+
+# Release outputs placed beside the module instead of under build/
+/app/release/
+
+# Local SDK path. Each machine generates its own.
 local.properties
+/local.properties
+
+# Signing keys. Never publish these.
+*.jks
+*.keystore
+
+# Optional live-test credentials. Read only when LIVE_API=1.
+api_key.txt
+api_url.txt
+
+# IDE
 .idea/
-*.iml
+.navigation/
+*.swp
+
+# Kotlin
 .kotlin/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local agent workflow; contains this machine's absolute paths.
+.claude/
 
 # Accidental Gradle cache path created by tooling
 app/${user.home}/

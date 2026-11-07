@@ -1,6 +1,7 @@
 package com.dawnmoon.music_download.data.remote
 
 import com.dawnmoon.music_download.core.Redaction
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.domain.model.AudioFormat
 import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.Quota
@@ -11,8 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
-import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -21,44 +20,50 @@ import okhttp3.Response
 interface ChkszApi {
 
     /** 用歌曲 ID 与音质换取音频直链与元数据。 */
-    suspend fun fetchSong(songId: SongId, quality: MusicQuality, apiKey: String): ApiResponse<ResolvedTrack>
+    suspend fun fetchSong(
+        songId: SongId,
+        quality: MusicQuality,
+        credentials: ApiCredentials,
+    ): ApiResponse<ResolvedTrack>
 
-    /** Key 校验：`keyword` 固定为 `music`，`limit=1`；成功只表示 Key 可用。 */
-    suspend fun validateKey(apiKey: String): ApiResponse<Unit>
+    /** 凭据校验：`keyword` 固定为 `music`，`limit=1`；成功只表示地址与 Key 可用。 */
+    suspend fun validateKey(credentials: ApiCredentials): ApiResponse<Unit>
 }
 
 /**
  * 基于 OkHttp 的 [ChkszApi]。
  *
+ * 地址来自每次调用的 [ApiCredentials]，应用内不内置任何接口地址。
  * 判定以 HTTP 状态码为准；所有对外消息都经过 [Redaction]，防止 Key 出现在异常或界面中。
  */
 class DefaultChkszApi(
     private val client: OkHttpClient,
-    private val baseUrl: HttpUrl = "https://api.chksz.com".toHttpUrl(),
     private val json: Json,
 ) : ChkszApi {
 
     override suspend fun fetchSong(
         songId: SongId,
         quality: MusicQuality,
-        apiKey: String,
+        credentials: ApiCredentials,
     ): ApiResponse<ResolvedTrack> = execute(
+        baseUrl = credentials.baseUrl,
         path = MUSIC_PATH,
         parameters = listOf(
             "id" to songId.value.toString(),
             "level" to quality.apiValue,
-            "apikey" to apiKey,
+            "apikey" to credentials.apiKey,
         ),
     ) { body, quota ->
         decodeTrack(body, quota, songId, quality)
     }
 
-    override suspend fun validateKey(apiKey: String): ApiResponse<Unit> = execute(
+    override suspend fun validateKey(credentials: ApiCredentials): ApiResponse<Unit> = execute(
+        baseUrl = credentials.baseUrl,
         path = SEARCH_PATH,
         parameters = listOf(
             "keyword" to SEARCH_KEYWORD,
             "limit" to "1",
-            "apikey" to apiKey,
+            "apikey" to credentials.apiKey,
         ),
     ) { body, quota ->
         decodeSearch(body, quota)
@@ -68,13 +73,17 @@ class DefaultChkszApi(
      * 发起一次 GET 请求，成功时交给 [decode]，失败时按状态码映射。
      *
      * 网络异常统一转为 [ApiFailure.Network]；此时没有响应头，额度为 null。
+     * 地址无法解析时不发请求，直接返回 [ApiFailure.InvalidRequest]。
      */
     private suspend fun <T> execute(
+        baseUrl: String,
         path: String,
         parameters: List<Pair<String, String>>,
         decode: (body: String, quota: Quota) -> ApiResponse<T>,
     ): ApiResponse<T> = try {
-        val url = baseUrl.newBuilder()
+        val base = ApiBaseUrl.parse(baseUrl)
+            ?: return ApiResponse.Failure(ApiFailure.InvalidRequest(INVALID_BASE_URL_MESSAGE), quota = null)
+        val url = base.newBuilder()
             .addPathSegments(path)
             .apply { parameters.forEach { (name, value) -> addQueryParameter(name, value) } }
             .build()
@@ -183,5 +192,7 @@ class DefaultChkszApi(
 
         const val UNKNOWN_TITLE = "未知歌曲"
         const val UNKNOWN_ARTIST = "未知艺术家"
+
+        const val INVALID_BASE_URL_MESSAGE = "API 地址无效"
     }
 }

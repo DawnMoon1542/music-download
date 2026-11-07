@@ -4,6 +4,7 @@ import com.dawnmoon.music_download.data.remote.ApiFailure
 import com.dawnmoon.music_download.data.remote.ApiResponse
 import com.dawnmoon.music_download.data.remote.ChkszApi
 import com.dawnmoon.music_download.data.remote.DefaultChkszApi
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.domain.model.AudioFormat
 import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.Quota
@@ -14,7 +15,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -27,6 +27,7 @@ class ChkszApiTest {
 
     private lateinit var server: MockWebServer
     private lateinit var api: ChkszApi
+    private lateinit var credentials: ApiCredentials
 
     @Before
     fun setUp() {
@@ -34,9 +35,9 @@ class ChkszApiTest {
         server.start()
         api = DefaultChkszApi(
             client = OkHttpClient(),
-            baseUrl = server.url("/"),
             json = Json { ignoreUnknownKeys = true },
         )
+        credentials = ApiCredentials(baseUrl = server.url("/").toString(), apiKey = API_KEY)
     }
 
     @After
@@ -48,7 +49,7 @@ class ChkszApiTest {
     fun `fetchSong maps successful response fields`() = runTest {
         server.enqueueJson(200, successBody())
 
-        val track = successOf(api.fetchSong(SongId(1867150097), MusicQuality.Hires, API_KEY))
+        val track = successOf(api.fetchSong(SongId(1867150097), MusicQuality.Hires, credentials))
 
         assertEquals(SongId(1867150097), track.songId)
         assertEquals("夏霞", track.title)
@@ -67,7 +68,7 @@ class ChkszApiTest {
     fun `fetchSong fills blank title and artist with fallback text`() = runTest {
         server.enqueueJson(200, successBody(name = "", artist = ""))
 
-        val track = successOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY))
+        val track = successOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials))
 
         assertTrue("title should fall back to non blank text", track.title.isNotBlank())
         assertTrue("artist should fall back to non blank text", track.artist.isNotBlank())
@@ -77,7 +78,7 @@ class ChkszApiTest {
     fun `fetchSong uses requested quality when response level is unknown`() = runTest {
         server.enqueueJson(200, successBody(level = "ultra"))
 
-        val track = successOf(api.fetchSong(SongId(42), MusicQuality.Hires, API_KEY))
+        val track = successOf(api.fetchSong(SongId(42), MusicQuality.Hires, credentials))
 
         assertEquals(MusicQuality.Hires, track.actualQuality)
     }
@@ -86,7 +87,7 @@ class ChkszApiTest {
     fun `fetchSong derives format from response quality when url has no extension`() = runTest {
         server.enqueueJson(200, successBody(level = "lossless", url = "https://cdn.example.com/audio/song"))
 
-        val track = successOf(api.fetchSong(SongId(42), MusicQuality.Standard, API_KEY))
+        val track = successOf(api.fetchSong(SongId(42), MusicQuality.Standard, credentials))
 
         assertEquals(MusicQuality.Lossless, track.actualQuality)
         assertEquals(AudioFormat.Flac, track.format)
@@ -96,7 +97,7 @@ class ChkszApiTest {
     fun `fetchSong sends song id quality and key as query parameters`() = runTest {
         server.enqueueJson(200, successBody())
 
-        api.fetchSong(SongId(2034742057), MusicQuality.Standard, API_KEY)
+        api.fetchSong(SongId(2034742057), MusicQuality.Standard, credentials)
 
         val request = server.takeRequest()
         assertEquals("GET", request.method)
@@ -114,7 +115,7 @@ class ChkszApiTest {
             headers = quotaHeaders(free = 37, paid = 120, limit = 20),
         )
 
-        val response = api.validateKey(API_KEY)
+        val response = api.validateKey(credentials)
 
         successOf(response)
         assertEquals(
@@ -131,11 +132,36 @@ class ChkszApiTest {
     }
 
     @Test
+    fun `validateKey accepts artists returned as a string`() = runTest {
+        server.enqueueJson(
+            code = 200,
+            body = """
+                {
+                  "code": 200,
+                  "msg": "success",
+                  "data": {
+                    "songs": [
+                      {
+                        "id": 1315196858,
+                        "name": "Party Music",
+                        "artists": "Deep Side",
+                        "album": "Deep Side"
+                      }
+                    ]
+                  }
+                }
+            """.trimIndent(),
+        )
+
+        successOf(api.validateKey(credentials))
+    }
+
+    @Test
     fun `unauthorized response maps to invalid key failure`() = runTest {
         val message = "apikey 无效或已失效"
         server.enqueueJson(401, errorBody(401, message))
 
-        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY))
+        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials))
 
         assertEquals(ApiFailure.InvalidKey(message), failure)
     }
@@ -145,7 +171,7 @@ class ChkszApiTest {
         val message = "免费和付费额度均已用尽"
         server.enqueueJson(402, errorBody(402, message))
 
-        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY))
+        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials))
 
         assertEquals(ApiFailure.QuotaExhausted(message), failure)
     }
@@ -155,7 +181,7 @@ class ChkszApiTest {
         val message = "用户、Key 或 IP 被封禁"
         server.enqueueJson(403, errorBody(403, message))
 
-        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY))
+        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials))
 
         assertEquals(ApiFailure.Forbidden(message), failure)
     }
@@ -165,7 +191,7 @@ class ChkszApiTest {
         val message = "参数缺失或格式错误"
         server.enqueueJson(400, errorBody(400, message))
 
-        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY))
+        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials))
 
         assertEquals(ApiFailure.InvalidRequest(message), failure)
     }
@@ -175,7 +201,7 @@ class ChkszApiTest {
         val message = "Music URL not found, song may be unavailable at this quality level"
         server.enqueueJson(404, errorBody(404, message))
 
-        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Hires, API_KEY))
+        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Hires, credentials))
 
         assertEquals(ApiFailure.QualityUnavailable(message), failure)
     }
@@ -185,7 +211,7 @@ class ChkszApiTest {
         val message = "资源不存在"
         server.enqueueJson(404, errorBody(404, message))
 
-        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Hires, API_KEY))
+        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Hires, credentials))
 
         assertEquals(ApiFailure.NotFound(message), failure)
     }
@@ -199,7 +225,7 @@ class ChkszApiTest {
             headers = mapOf("Retry-After" to "7"),
         )
 
-        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY))
+        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials))
 
         assertEquals(ApiFailure.RateLimited(7, message), failure)
     }
@@ -209,7 +235,7 @@ class ChkszApiTest {
         val message = "超过速率限制"
         server.enqueueJson(429, errorBody(429, message))
 
-        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY))
+        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials))
 
         assertEquals(ApiFailure.RateLimited(null, message), failure)
     }
@@ -219,7 +245,7 @@ class ChkszApiTest {
         val message = "API 已被管理员停用"
         server.enqueueJson(503, errorBody(503, message))
 
-        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY))
+        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials))
 
         assertEquals(ApiFailure.ServiceUnavailable(message), failure)
     }
@@ -228,7 +254,7 @@ class ChkszApiTest {
     fun `non json body maps to malformed failure`() = runTest {
         server.enqueueJson(200, "not a json document")
 
-        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY))
+        val failure = failureOf(api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials))
 
         assertTrue(failure is ApiFailure.Malformed)
     }
@@ -241,7 +267,7 @@ class ChkszApiTest {
             headers = quotaHeaders(free = 37, paid = 120, limit = 20),
         )
 
-        val response = api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY)
+        val response = api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials)
 
         assertEquals(Quota(freeRemaining = 37, paidRemaining = 120, limitPerMinute = 20), quotaOf(response))
     }
@@ -254,7 +280,7 @@ class ChkszApiTest {
             headers = quotaHeaders(free = 0, paid = 0, limit = 20),
         )
 
-        val response = api.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY)
+        val response = api.fetchSong(SongId(42), MusicQuality.Exhigh, credentials)
 
         assertEquals(Quota(freeRemaining = 0, paidRemaining = 0, limitPerMinute = 20), quotaOf(response))
     }
@@ -268,11 +294,11 @@ class ChkszApiTest {
             .build()
         val failingApi = DefaultChkszApi(
             client = client,
-            baseUrl = "https://api.chksz.com".toHttpUrl(),
             json = Json { ignoreUnknownKeys = true },
         )
+        val remote = ApiCredentials(baseUrl = "https://api.test", apiKey = API_KEY)
 
-        val failure = failureOf(failingApi.fetchSong(SongId(42), MusicQuality.Exhigh, API_KEY))
+        val failure = failureOf(failingApi.fetchSong(SongId(42), MusicQuality.Exhigh, remote))
 
         assertTrue(failure is ApiFailure.Network)
         assertFalse(failure.message.contains(API_KEY))

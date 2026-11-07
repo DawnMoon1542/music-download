@@ -6,6 +6,7 @@ import com.dawnmoon.music_download.data.remote.ApiResponse
 import com.dawnmoon.music_download.data.remote.ChkszApi
 import com.dawnmoon.music_download.data.remote.RateLimiter
 import com.dawnmoon.music_download.data.repository.QuotaStore
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.domain.model.AudioFormat
 import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.Quota
@@ -37,7 +38,7 @@ class QualityResolverTest {
         }
 
         val harness = resolver(api)
-        val result = harness.resolver.resolve(songId, MusicQuality.Jymaster, API_KEY)
+        val result = harness.resolver.resolve(songId, MusicQuality.Jymaster, CREDENTIALS)
 
         assertEquals(MusicQuality.Lossless, successOf(result).actualQuality)
         // 每次尝试都经 ApiCaller，因此每个响应携带的额度都会被写入 QuotaStore。
@@ -66,7 +67,7 @@ class QualityResolverTest {
         }
 
         val harness = resolver(api)
-        val result = harness.resolver.resolve(songId, MusicQuality.Hires, API_KEY)
+        val result = harness.resolver.resolve(songId, MusicQuality.Hires, CREDENTIALS)
 
         assertEquals(MusicQuality.Lossless, successOf(result).actualQuality)
         assertEquals(listOf(MusicQuality.Hires), api.requestedQualities)
@@ -87,7 +88,7 @@ class QualityResolverTest {
         }
 
         val harness = resolver(api)
-        val result = harness.resolver.resolve(songId, MusicQuality.Hires, API_KEY)
+        val result = harness.resolver.resolve(songId, MusicQuality.Hires, CREDENTIALS)
 
         assertEquals(ApiResponse.Failure(failure, SNAPSHOT), result)
         assertEquals(listOf(MusicQuality.Hires), api.requestedQualities)
@@ -108,7 +109,7 @@ class QualityResolverTest {
         }
 
         val harness = resolver(api)
-        val result = harness.resolver.resolve(songId, MusicQuality.Hires, API_KEY)
+        val result = harness.resolver.resolve(songId, MusicQuality.Hires, CREDENTIALS)
 
         assertEquals(ApiResponse.Failure(failure, SNAPSHOT), result)
         // ApiCaller 对 429 各重试一次，两次请求都必须来自同一次 resolve，且之后不再降级。
@@ -124,7 +125,7 @@ class QualityResolverTest {
         }
 
         val harness = resolver(api)
-        val result = harness.resolver.resolve(songId, MusicQuality.Exhigh, API_KEY)
+        val result = harness.resolver.resolve(songId, MusicQuality.Exhigh, CREDENTIALS)
 
         // Exhigh 的降级链以 Standard 结束，最终应返回最后一次失败而不是第一次。
         assertEquals(
@@ -210,18 +211,18 @@ class QualityResolverTest {
         override suspend fun fetchSong(
             songId: SongId,
             quality: MusicQuality,
-            apiKey: String,
+            credentials: ApiCredentials,
         ): ApiResponse<ResolvedTrack> {
             requestedQualities += quality
             return onFetch(quality)
         }
 
-        override suspend fun validateKey(apiKey: String): ApiResponse<Unit> =
+        override suspend fun validateKey(credentials: ApiCredentials): ApiResponse<Unit> =
             throw UnsupportedOperationException("validateKey is not used by track resolution")
     }
 
     private companion object {
-        const val API_KEY = "chksz_test_secret_key_123"
+        val CREDENTIALS = ApiCredentials(baseUrl = "https://api.test", apiKey = "chksz_test_secret_key_123")
 
         /** 每条脚本化响应都携带同一份额度，用于确认调用确实经由 ApiCaller。 */
         val SNAPSHOT = Quota(freeRemaining = 3, paidRemaining = 5, limitPerMinute = 20)

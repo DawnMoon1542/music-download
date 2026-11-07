@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.AppDependencies
 import com.dawnmoon.music_download.MusicDownloadApp
 import com.dawnmoon.music_download.core.SystemAppClock
@@ -355,7 +356,7 @@ class DownloadServiceTest {
             sourceUrl = "https://music.163.com/song?id=${songId.value}",
             songId = songId,
         )
-        originalDependencies.settings.setApiKey(TEST_API_KEY)
+        originalDependencies.settings.setApiCredentials(ApiCredentials("https://api.test", TEST_API_KEY))
         val outcome = originalDependencies.repository.enqueueLinks(
             listOf(link),
             MusicQuality.Exhigh,

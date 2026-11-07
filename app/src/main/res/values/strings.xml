@@ -1,3 +1,143 @@
 <resources>
     <string name="app_name">Music Download</string>
+
+    <!-- 工作台 -->
+    <string name="workbench_title">音乐下载</string>
+    <string name="add_download_title">添加下载</string>
+    <string name="link_input_placeholder">粘贴网易云链接或分享文案</string>
+    <string name="clear_input_content_description">清空输入</string>
+    <string name="enqueue_action">解析并下载</string>
+    <string name="tasks_title">下载任务</string>
+    <string name="empty_tasks">暂无下载任务，粘贴链接开始</string>
+    <string name="empty_tasks_hint">支持一次粘贴多条链接或整段分享文案</string>
+    <string name="task_search_placeholder">搜索曲名、艺术家</string>
+    <string name="empty_task_search">没有匹配的任务</string>
+    <string name="status_group_failed">异常 %1$d</string>
+    <string name="status_group_active">进行中 %1$d</string>
+    <string name="status_group_cancelled">已取消 %1$d</string>
+    <string name="status_group_completed">已完成 %1$d</string>
+    <string name="quality_label">音质</string>
+    <string name="quota_summary">免费 %1$s · 付费 %2$s</string>
+    <string name="quota_unknown">—</string>
+    <string name="quota_low_warning">额度不足</string>
+    <string name="task_failure_detail">失败详情：%1$s</string>
+    <string name="task_failure_details_label">失败详情</string>
+    <string name="task_failure_expand_action">展开失败详情</string>
+    <string name="task_failure_collapse_action">收起失败详情</string>
+    <string name="task_cover_content_description">封面</string>
+
+    <!-- 日期格式：参数依次为月、日（或年、月、日）与时间 -->
+    <string name="date_format_current_year">%1$d月%2$d日 %3$s</string>
+    <string name="date_format_other_year">%1$d年%2$d月%3$d日 %4$s</string>
+
+    <!-- 任务操作 -->
+    <string name="action_pause">暂停</string>
+    <string name="action_resume">继续</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_retry">重试</string>
+    <string name="action_delete_record">删除记录</string>
+    <string name="more_actions_content_description">更多操作</string>
+    <string name="action_pause_all">全部暂停</string>
+    <string name="action_resume_all">全部继续</string>
+    <string name="action_retry_all_failed">全部重试失败</string>
+    <string name="action_cancel_all">全部取消</string>
+    <string name="cancel_all_confirmation">将取消所有进行中的任务，此操作不可撤销。</string>
+    <string name="action_confirm">确认</string>
+
+    <!-- 历史记录 -->
+    <string name="action_clear_history">清空已完成记录</string>
+    <string name="clear_history_records_only">仅清空记录</string>
+    <string name="clear_history_with_files">同时删除文件</string>
+    <string name="action_play">播放</string>
+    <string name="action_share">分享</string>
+    <string name="action_redownload">按音质重新下载</string>
+    <string name="action_delete_record_and_file">删除记录与文件</string>
+    <string name="history_file_missing">文件已不存在</string>
+    <string name="history_delete_file_failed">文件删除失败，已保留记录</string>
+    <string name="history_clear_failed_count">%1$d 条记录未能删除，已保留</string>
+    <string name="history_cleared">已清空历史</string>
+    <string name="history_redownload_unavailable">无法重新下载该任务</string>
+    <string name="history_redownload_duplicate">该歌曲已在下载队列中</string>
+
+    <!-- 入队提示 -->
+    <string name="enqueue_success">已加入 %1$d 个任务</string>
+    <string name="enqueue_skipped">跳过 %1$d 个已在队列中的歌曲</string>
+    <string name="enqueue_unrecognized">%1$d 个链接无法识别</string>
+    <string name="enqueue_no_links">未找到网易云歌曲链接</string>
+    <string name="enqueue_nothing">没有可加入的任务</string>
+
+    <!-- 任务状态 -->
+    <string name="status_queued">排队中</string>
+    <string name="status_resolving">解析中</string>
+    <string name="status_waiting">等待中</string>
+    <string name="status_downloading">下载中</string>
+    <string name="status_paused">已暂停</string>
+    <string name="status_completed">已完成</string>
+    <string name="status_cancelled">已取消</string>
+
+    <!-- 任务失败 -->
+    <string name="failure_network">网络错误，请检查网络后重试</string>
+    <string name="failure_invalid_key">API Key 无效，请到设置中检查</string>
+    <string name="failure_quota_exhausted">今日额度已用尽，可等待次日重置或兑换额度</string>
+    <string name="failure_forbidden">访问被拒绝</string>
+    <string name="failure_rate_limited">请求过于频繁，请稍后再试</string>
+    <string name="failure_invalid_request">请求参数异常</string>
+    <string name="failure_quality_unavailable">该歌曲在所选及更低音质下均不可用</string>
+    <string name="failure_not_found">资源不存在</string>
+    <string name="failure_service_unavailable">服务暂时不可用，请稍后重试</string>
+    <string name="failure_malformed">接口返回异常，请稍后重试</string>
+    <string name="failure_stream_expired">下载链接已失效，重试将重新解析</string>
+    <string name="failure_integrity">文件校验失败，已删除不完整文件</string>
+    <string name="failure_storage">存储空间不足</string>
+    <string name="failure_unknown">下载失败</string>
+    <string name="failure_with_message">%1$s：%2$s</string>
+
+    <!-- 设置 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_content_description">设置</string>
+    <string name="back_content_description">返回</string>
+
+    <!-- 设置：API 地址与 Key -->
+    <string name="settings_section_api_key">API 配置</string>
+    <string name="settings_api_description">API 地址与 Key 需一起填写，保存时会联网验证一次（消耗 1 次额度）。</string>
+    <string name="settings_api_url_label">API 地址</string>
+    <string name="settings_api_url_placeholder">https://api.example.com</string>
+    <string name="settings_api_key_label">API Key</string>
+    <string name="settings_key_saved">已保存：%1$s · %2$s</string>
+    <string name="settings_url_invalid_format">API 地址格式不正确，需以 http:// 或 https:// 开头</string>
+    <string name="settings_key_saving">验证中</string>
+    <string name="settings_key_save_and_validate">保存并验证</string>
+    <string name="settings_key_show">显示 Key</string>
+    <string name="settings_key_hide">隐藏 Key</string>
+    <string name="settings_key_status_idle">未验证</string>
+    <string name="settings_key_status_validating">验证中</string>
+    <string name="settings_key_status_valid">验证通过</string>
+    <string name="settings_key_status_warning">警告：%1$s</string>
+    <string name="settings_key_invalid_format">API Key 格式不正确</string>
+
+    <!-- 设置：下载与外观 -->
+    <string name="settings_section_download">下载</string>
+    <string name="settings_default_quality">默认音质</string>
+    <string name="settings_concurrency">同时下载数</string>
+    <string name="settings_section_appearance">外观</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+
+    <!-- 设置：历史与关于 -->
+    <string name="settings_section_history">历史</string>
+    <string name="settings_section_about">关于</string>
+    <string name="settings_about_version_label">版本</string>
+    <string name="settings_about_credits">特别鸣谢</string>
+    <string name="settings_about_credits_supporting">ChKSz API 的作者与赞助者</string>
+
+    <!-- 特别鸣谢 -->
+    <string name="credits_title">特别鸣谢</string>
+    <string name="credits_intro">本应用通过 ChKSz API 解析歌曲。下面的名字来自项目贡献者页面，感谢他们让服务得以运行。</string>
+    <string name="credits_source">查看项目贡献者</string>
+    <string name="credits_source_url" translatable="false">https://api.chksz.com/#contributors</string>
+    <string name="credits_open_profile">打开 %1$s 的主页</string>
+    <string name="credits_badge_maintainer">维护</string>
+    <string name="credits_badge_sponsor">赞助</string>
+    <string name="credits_badge_provider">上游</string>
 </resources>
