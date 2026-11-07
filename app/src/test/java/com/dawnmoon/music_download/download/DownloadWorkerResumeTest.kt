@@ -24,8 +24,11 @@ import java.security.MessageDigest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
+import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
+import mockwebserver3.SocketEffect
 import okhttp3.OkHttpClient
 import okio.Buffer
 import org.junit.After
@@ -670,6 +673,78 @@ class DownloadWorkerResumeTest {
     }
 
     @Test
+    fun `retries from zero when a transient failure follows a range not satisfiable response`() = runTest {
+        val content = sampleBytes(FULL_SIZE)
+        val fileStore = FakeTaskFileStore(tempFolder.newFolder())
+        val file = seedFile(fileStore, content, RESUME_AT)
+        val repo = ResumableTaskRepository(
+            task(
+                sizeBytes = content.size.toLong(),
+                md5 = md5Hex(content),
+                streamUrl = streamUrl("/audio"),
+                etag = ETAG,
+                bytesDownloaded = RESUME_AT.toLong(),
+                mediaStoreId = file.mediaStoreId,
+                fileName = file.displayName,
+            ),
+        )
+        server.dispatcher = RangeAwareAudioDispatcher(content)
+
+        val result = worker(
+            repo = repo,
+            fileStore = fileStore,
+            resolver = QueueTrackResolver(),
+            client = OkHttpClient.Builder().retryOnConnectionFailure(false).build(),
+        ).execute(TASK_ID)
+
+        assertEquals(WorkerResult.Completed, result)
+        assertEquals("bytes=$RESUME_AT-", server.takeRequest().headers["Range"])
+        assertNull(
+            "the retry after a 416 must not resend the stale range",
+            server.takeRequest().headers["Range"],
+        )
+        assertNull(
+            "a transient failure after a 416 must not revive the stale range",
+            server.takeRequest().headers["Range"],
+        )
+        assertArrayEquals(content, fileStore.contentOf(file.mediaStoreId))
+    }
+
+    @Test
+    fun `rebuilds the file when the truncation after a range not satisfiable fails once`() = runTest {
+        val content = sampleBytes(FULL_SIZE)
+        val delegate = FakeTaskFileStore(tempFolder.newFolder())
+        val file = seedFile(delegate, content, RESUME_AT)
+        val fileStore = FailFirstTruncateFileStore(delegate)
+        val repo = ResumableTaskRepository(
+            task(
+                sizeBytes = content.size.toLong(),
+                md5 = md5Hex(content),
+                streamUrl = streamUrl("/audio"),
+                etag = ETAG,
+                bytesDownloaded = RESUME_AT.toLong(),
+                mediaStoreId = file.mediaStoreId,
+                fileName = file.displayName,
+            ),
+        )
+        server.enqueue(MockResponse.Builder().code(416).build())
+        enqueueAudio(content)
+
+        val result = worker(repo, fileStore, resolver = QueueTrackResolver()).execute(TASK_ID)
+
+        assertEquals(WorkerResult.Completed, result)
+        assertEquals("bytes=$RESUME_AT-", server.takeRequest().headers["Range"])
+        assertNull(
+            "an unopenable entry must not leave the stale range in play",
+            server.takeRequest().headers["Range"],
+        )
+        val rebuiltId = requireNotNull(repo.task.mediaStoreId)
+        assertTrue("the unopenable entry must be replaced", rebuiltId != file.mediaStoreId)
+        assertEquals("a rebuilt entry starts from zero progress", 0L, repo.attachedBytes)
+        assertArrayEquals(content, delegate.contentOf(rebuiltId))
+    }
+
+    @Test
     fun `retries server errors and completes on the third attempt`() = runTest {
         val content = sampleBytes(FULL_SIZE)
         val fileStore = FakeTaskFileStore(tempFolder.newFolder())
@@ -876,6 +951,7 @@ class DownloadWorkerResumeTest {
         repo: ResumableTaskRepository,
         fileStore: TaskFileStore,
         resolver: TrackResolver,
+        client: OkHttpClient = this.client,
     ): DefaultDownloadWorker = DefaultDownloadWorker(
         repo = repo,
         resolver = resolver,
@@ -984,6 +1060,35 @@ class DownloadWorkerResumeTest {
 }
 
 /**
+ * 模拟不支持 Range 的直链，并在下一次完整请求开始时断开一次连接。
+ *
+ * 带 Range 的请求一律返回 416；第一个不带 Range 的请求在响应开始前关闭 socket，
+ * 制造一次服务端无法响应的瞬时 IOException；之后的不带 Range 请求返回完整音频。
+ * 这样可以在 416 与成功响应之间插入一次与文件写入无关的网络中断。
+ */
+private class RangeAwareAudioDispatcher(private val content: ByteArray) : Dispatcher() {
+
+    private var fullRequests = 0
+
+    override fun dispatch(request: RecordedRequest): MockResponse {
+        if (request.headers["Range"] != null) {
+            return MockResponse.Builder().code(416).build()
+        }
+        fullRequests += 1
+        if (fullRequests == 1) {
+            return MockResponse.Builder()
+                .onResponseStart(SocketEffect.CloseSocket())
+                .build()
+        }
+        return MockResponse.Builder()
+            .code(200)
+            .addHeader("Content-Type", "audio/mpeg")
+            .body(Buffer().write(content))
+            .build()
+    }
+}
+
+/**
  * 在真实文件替身之上注入写入期故障的 [TaskFileStore]。
  *
  * - [failAppendAfterBytes]：首次追加写入该字节数后抛出 IOException，模拟读取响应体中途断流。
@@ -1069,6 +1174,26 @@ private class InterruptingFileStore(private val delegate: FakeTaskFileStore) : T
     override suspend fun md5Of(file: CreatedFile): String = delegate.md5Of(file)
 
     override suspend fun deleteById(mediaStoreId: Long): Boolean = delegate.deleteById(mediaStoreId)
+}
+
+/**
+ * 让第一次 [openTruncate] 以普通 [IOException] 失败，模拟条目在 416 之后暂时不可写。
+ *
+ * 失败原因刻意不包含 ENOSPC：这类瞬时错误必须按条目丢失重建，而不是判成 Storage 终止。
+ */
+private class FailFirstTruncateFileStore(
+    private val delegate: FakeTaskFileStore,
+) : TaskFileStore by delegate {
+
+    private var remainingFailures = 1
+
+    override suspend fun openTruncate(file: CreatedFile): OutputStream {
+        if (remainingFailures > 0) {
+            remainingFailures -= 1
+            throw IOException("模拟条目暂时不可写")
+        }
+        return delegate.openTruncate(file)
+    }
 }
 
 /**

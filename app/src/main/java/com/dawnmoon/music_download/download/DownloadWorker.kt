@@ -367,6 +367,26 @@ class DefaultDownloadWorker(
                                     fail(workingTask.id, FailureKind.Network, "Range 请求持续无法满足"),
                                 )
                             } else {
+                                // 416 说明服务端已不接受旧起点。必须在这里立即清空文件：
+                                // 若延迟到写响应时再截断，期间的瞬时网络失败会触发 resync，
+                                // 从残留字节重新校准出旧 Range，第三次请求再次收到 416。
+                                try {
+                                    fileStore.openTruncate(file).close()
+                                } catch (error: IOException) {
+                                    // 只有磁盘满一类错误才是不可重试的存储失败；条目被系统
+                                    // 清理或暂时不可写时与 rebuildForNewContent 一致，按丢失
+                                    // 处理：删除旧条目并重建，否则重试会沿用旧 Range 再收 416。
+                                    if (isStorageFailure(error)) {
+                                        return@withContext failStorage(
+                                            taskId = workingTask.id,
+                                            file = file,
+                                            message = error.message ?: "本地写入失败",
+                                        )
+                                    }
+                                    fileStore.delete(file)
+                                    resync()
+                                }
+                                repo.updateProgress(workingTask.id, 0L)
                                 truncated = true
                                 start = 0
                                 decision = Decision.Continue
