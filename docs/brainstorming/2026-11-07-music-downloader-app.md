@@ -99,7 +99,7 @@
 - 依赖：Stage 1
 - 设计状态：已完成
 - 计划状态：已完成
-- 执行状态：未完成
+- 执行状态：已完成
 - 设计文件：`docs/grill/2026-11-07-music-downloader-app-stage-2.md`（已确认）
 - 计划文件：`docs/plans/2026-11-07-music-downloader-app-stage-2.md`（已确认）
 
