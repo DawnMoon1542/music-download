@@ -25,6 +25,18 @@ import com.dawnmoon.music_download.data.repository.RoomQuotaStore
 import com.dawnmoon.music_download.data.repository.TaskRepository
 import com.dawnmoon.music_download.domain.DefaultQualityResolver
 import com.dawnmoon.music_download.domain.TrackResolver
+import com.dawnmoon.music_download.download.AndroidWakeLockController
+import com.dawnmoon.music_download.download.DefaultDownloadWorker
+import com.dawnmoon.music_download.download.DownloadController
+import com.dawnmoon.music_download.download.DownloadEngine
+import com.dawnmoon.music_download.download.DownloadNotifications
+import com.dawnmoon.music_download.download.DownloadService
+import com.dawnmoon.music_download.download.DownloadServiceStarter
+import com.dawnmoon.music_download.download.FileNamer
+import com.dawnmoon.music_download.download.MediaStoreTaskFileStore
+import com.dawnmoon.music_download.download.ServiceStopper
+import com.dawnmoon.music_download.download.TaskDownloader
+import com.dawnmoon.music_download.download.TaskFileStore
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -94,6 +106,50 @@ class AppContainer(context: Context) : AppDependencies {
     }
 
     override val linkResolver: LinkResolver by lazy { HttpShortLinkResolver(okHttpClient) }
+
+    /** 下载文件统一写入公共 Music 目录的 pending 条目。 */
+    private val fileStore: TaskFileStore by lazy { MediaStoreTaskFileStore(appContext) }
+
+    private val downloadNotifications: DownloadNotifications by lazy {
+        DownloadNotifications(appContext)
+    }
+
+    private val downloadWakeLock: AndroidWakeLockController by lazy {
+        AndroidWakeLockController(appContext)
+    }
+
+    private val downloadWorker: TaskDownloader by lazy {
+        DefaultDownloadWorker(
+            repo = repository,
+            resolver = qualityResolver,
+            settings = settings,
+            fileStore = fileStore,
+            namer = FileNamer(repository),
+            client = okHttpClient,
+            clock = clock,
+        )
+    }
+
+    /**
+     * 进程级唯一的下载引擎。
+     *
+     * 服务通过 [DownloadService.start] 启动自身，空闲时回调 [ServiceStopper] 停止；
+     * 两个回调都经由 [DownloadService] 的静态入口，避免容器与 Android 组件循环依赖。
+     */
+    override val downloadController: DownloadController by lazy {
+        DownloadEngine(
+            repo = repository,
+            resolver = qualityResolver,
+            settings = settings,
+            fileStore = fileStore,
+            downloader = downloadWorker,
+            notifications = downloadNotifications,
+            wakeLock = downloadWakeLock,
+            clock = clock,
+            serviceStopper = ServiceStopper { DownloadService.stop(appContext) },
+            serviceStarter = DownloadServiceStarter { context -> DownloadService.start(context) },
+        )
+    }
 
     /**
      * 把上一个进程遗留的可继续任务统一置为 Paused。

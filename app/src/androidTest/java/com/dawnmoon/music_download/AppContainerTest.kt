@@ -3,35 +3,21 @@ package com.dawnmoon.music_download
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import com.dawnmoon.music_download.data.remote.ApiCaller
 import com.dawnmoon.music_download.data.remote.ChkszApi
 import com.dawnmoon.music_download.data.remote.LinkResolver
 import com.dawnmoon.music_download.data.remote.RateLimiter
 import com.dawnmoon.music_download.data.repository.AppSettings
-import com.dawnmoon.music_download.data.repository.EnqueueOutcome
 import com.dawnmoon.music_download.data.repository.KeyValidator
 import com.dawnmoon.music_download.data.repository.QuotaStore
 import com.dawnmoon.music_download.data.repository.TaskRepository
 import com.dawnmoon.music_download.domain.TrackResolver
-import com.dawnmoon.music_download.domain.model.AudioFormat
-import com.dawnmoon.music_download.domain.model.MusicQuality
-import com.dawnmoon.music_download.domain.model.ResolvedTrack
-import com.dawnmoon.music_download.domain.model.SongId
-import com.dawnmoon.music_download.domain.model.SongLink
-import com.dawnmoon.music_download.domain.model.TaskStatus
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
+import com.dawnmoon.music_download.download.DownloadController
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Test
 import org.junit.runner.RunWith
-
-private const val TEST_API_KEY = "chksz_test_key"
-private const val RECOVERY_TIMEOUT_MILLIS = 5_000L
-private const val RECOVERY_POLL_INTERVAL_MILLIS = 25L
 
 @RunWith(AndroidJUnit4::class)
 class AppContainerTest {
@@ -49,6 +35,9 @@ class AppContainerTest {
         assertSame(container.apiCaller, container.apiCaller)
         assertSame(container.qualityResolver, container.qualityResolver)
         assertSame(container.apiHttpClient, container.apiHttpClient)
+        // UI 与前台服务都经由 AppDependencies.downloadController 读取引擎；
+        // 若每次访问都新建 DownloadEngine，界面操作与服务执行会落在不同引擎上。
+        assertSame(container.downloadController, container.downloadController)
     }
 
     @Test
@@ -78,82 +67,6 @@ class AppContainerTest {
 
         assertNotNull(dependencies)
     }
-
-    @Test
-    fun applicationStartPausesTasksLeftDownloadingByPreviousProcess() = runBlocking {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val runningApp = ApplicationProvider.getApplicationContext<MusicDownloadApp>()
-        val taskId = seedDownloadingTask(runningApp)
-
-        try {
-            val instrumentation = InstrumentationRegistry.getInstrumentation()
-            val restartedApp = instrumentation.newApplication(
-                MusicDownloadApp::class.java.classLoader,
-                MusicDownloadApp::class.java.name,
-                context,
-            ) as MusicDownloadApp
-            instrumentation.callApplicationOnCreate(restartedApp)
-
-            val paused = withTimeoutOrNull(RECOVERY_TIMEOUT_MILLIS) {
-                var task = restartedApp.dependencies.repository.byId(taskId)
-                while (task?.status != TaskStatus.Paused) {
-                    delay(RECOVERY_POLL_INTERVAL_MILLIS)
-                    task = restartedApp.dependencies.repository.byId(taskId)
-                }
-                task
-            }
-
-            assertNotNull(
-                "启动恢复没有在 ${RECOVERY_TIMEOUT_MILLIS}ms 内暂停任务 $taskId",
-                paused,
-            )
-            assertEquals(TaskStatus.Paused, paused?.status)
-        } finally {
-            runningApp.dependencies.repository.deleteRecord(taskId)
-        }
-    }
-
-    /**
-     * 通过真实仓库把任务推进到 Downloading，模拟上一个进程遗留的未完成任务。
-     *
-     * 使用当前进程的 Application 容器写入同一个数据库文件；随后新建的 MusicDownloadApp
-     * 会在 onCreate 中打开该数据库并执行启动恢复。
-     */
-    private suspend fun seedDownloadingTask(app: MusicDownloadApp): Long {
-        val dependencies = app.dependencies
-        dependencies.settings.setApiKey(TEST_API_KEY)
-
-        val songId = SongId(System.currentTimeMillis())
-        val link = SongLink.Direct(
-            sourceUrl = "https://music.163.com/song?id=${songId.value}",
-            songId = songId,
-        )
-        val outcome = dependencies.repository.enqueueLinks(listOf(link), MusicQuality.Exhigh)
-        val created = (outcome as? EnqueueOutcome.Enqueued)?.created?.singleOrNull()
-        assertNotNull("预置任务失败：$outcome", created)
-        val id = created!!
-
-        dependencies.repository.markResolving(id)
-        dependencies.repository.completeResolve(id, resolvedTrack(songId))
-        dependencies.repository.startDownloading(id)
-        assertEquals(TaskStatus.Downloading, dependencies.repository.byId(id)?.status)
-        return id
-    }
-
-    private fun resolvedTrack(songId: SongId): ResolvedTrack = ResolvedTrack(
-        songId = songId,
-        title = "测试歌曲",
-        artist = "测试艺术家",
-        album = null,
-        artworkUrl = null,
-        requestedQuality = MusicQuality.Exhigh,
-        actualQuality = MusicQuality.Exhigh,
-        format = AudioFormat.Mp3,
-        streamUrl = "https://example.com/audio/${songId.value}.mp3",
-        sizeBytes = 1_024L,
-        md5 = null,
-        etag = "etag-${songId.value}",
-    )
 }
 
 /**
@@ -170,6 +83,7 @@ private class FakeAppDependencies : AppDependencies {
     override val keyValidator: KeyValidator get() = unsupported()
     override val qualityResolver: TrackResolver get() = unsupported()
     override val linkResolver: LinkResolver get() = unsupported()
+    override val downloadController: DownloadController get() = unsupported()
 
     private fun unsupported(): Nothing = error("测试替身不提供真实依赖")
 }

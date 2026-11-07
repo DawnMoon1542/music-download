@@ -41,7 +41,7 @@
 
 - [x] Task 3-1 — 通知发布器、WakeLock 控制器
 - [x] Task 3-2 — 解析队列、下载池与 DownloadEngine
-- [ ] Task 3-3 — 前台服务、容器装配与集成验证
+- [x] Task 3-3 — 前台服务、容器装配与集成验证
 
 ---
 

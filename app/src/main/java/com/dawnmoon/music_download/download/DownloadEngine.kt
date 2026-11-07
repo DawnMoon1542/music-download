@@ -122,7 +122,7 @@ class DownloadEngine(
      * 重复调用会被忽略；作用域由宿主（前台服务或测试夹具）提供。
      * `attach` 完成后重放此前缓冲的控制操作。
      */
-    suspend fun attach(scope: CoroutineScope) {
+    override suspend fun attach(scope: CoroutineScope) {
         if (attached) return
         attached = true
         lastSampleTime = clock.elapsedRealtime()
@@ -165,7 +165,7 @@ class DownloadEngine(
      *
      * 对运行中的任务发送暂停信号，让下载器或解析器完成收尾；随后取消整个引擎作用域。
      */
-    fun detach() {
+    override fun detach() {
         if (!attached) return
         attached = false
         parseWorker?.cancelActiveNow(CancellationSignal.Pause)

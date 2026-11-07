@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
+import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
@@ -136,15 +137,30 @@ class DownloadNotificationsTest {
     @Test
     fun clearCancelsPostedNotification() {
         notifications.update(snapshot(), paused = false)
-        assertEquals("update 应发布一条下载通知", 1, postedDownloadNotifications().size)
+        // NotificationManagerService 在内部 handler 上异步处理 notify/cancel，
+        // 紧接其后读取 activeNotifications 会与处理顺序竞争，因此轮询等待结果。
+        assertTrue("update 应发布一条下载通知", waitUntil { postedDownloadNotifications().size == 1 })
 
         notifications.clear()
 
-        assertTrue("clear 后不应保留下载通知", postedDownloadNotifications().isEmpty())
+        assertTrue("clear 后不应保留下载通知", waitUntil { postedDownloadNotifications().isEmpty() })
+    }
+
+    private fun waitUntil(timeoutMillis: Long = 2_000L, condition: () -> Boolean): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMillis
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (condition()) return true
+            SystemClock.sleep(25)
+        }
+        return condition()
     }
 
     private fun postedDownloadNotifications(): List<android.service.notification.StatusBarNotification> {
-        return manager.activeNotifications.filter { it.notification.channelId == CHANNEL_ID }
+        // 渠道 ID 只在包内唯一；Chrome 等系统应用也使用 `downloads` 渠道，
+        // 若只按 channelId 过滤会把其他应用的活动通知算进来。
+        return manager.activeNotifications.filter {
+            it.packageName == context.packageName && it.notification.channelId == CHANNEL_ID
+        }
     }
 
     private fun snapshot(
