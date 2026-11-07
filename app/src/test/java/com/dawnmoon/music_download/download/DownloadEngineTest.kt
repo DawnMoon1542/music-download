@@ -1234,6 +1234,70 @@ class DownloadEngineTest {
     }
 
     @Test
+    fun `a key-level parse failure lets the service go idle with stranded queued tasks`() = engineTest { harness ->
+        harness.repo.add(queuedTask(1))
+        harness.repo.add(queuedTask(2))
+        harness.resolver.behavior = { _, _, _ -> ApiResponse.Failure(ApiFailure.InvalidKey("bad key"), null) }
+
+        harness.engine.requestDownload(listOf(1, 2))
+        advanceTimeBy(1_000)
+        runCurrent()
+
+        assertEquals(TaskStatus.Failed, harness.repo.byId(1)?.status)
+        assertEquals(TaskStatus.Queued, harness.repo.byId(2)?.status)
+        assertEquals("the idle timeout has not elapsed yet", 0, harness.stopper.stopCount)
+
+        advanceTimeBy(2_000)
+        runCurrent()
+
+        assertEquals(
+            "queued tasks stranded by a parse pause must not keep the service alive",
+            1,
+            harness.stopper.stopCount,
+        )
+    }
+
+    @Test
+    fun `a storage failure lets the service go idle with stranded waiting tasks and resume recovers`() =
+        engineTest { harness ->
+            harness.downloader.behavior = { id ->
+                if (id == 1L) {
+                    harness.downloader.fail(id, FailureKind.Storage)
+                } else {
+                    harness.downloader.complete(id)
+                }
+            }
+            harness.repo.add(waitingTask(1))
+            harness.repo.add(waitingTask(2))
+
+            harness.engine.requestDownload(listOf(1, 2))
+            advanceTimeBy(1_000)
+            runCurrent()
+
+            assertEquals(TaskStatus.Failed, harness.repo.byId(1)?.status)
+            assertEquals(TaskStatus.Waiting, harness.repo.byId(2)?.status)
+            assertFalse("a storage failure must hold the pool", 2L in harness.downloader.started)
+            assertEquals("the idle timeout has not elapsed yet", 0, harness.stopper.stopCount)
+
+            advanceTimeBy(2_000)
+            runCurrent()
+
+            assertEquals(
+                "waiting tasks stranded by a pool pause must not keep the service alive",
+                1,
+                harness.stopper.stopCount,
+            )
+
+            harness.engine.resumeAll()
+            advanceTimeBy(5_000)
+            runCurrent()
+
+            assertFalse("resuming after the idle stop must clear the pool pause", harness.engine.snapshot.value.isPaused)
+            assertTrue("resuming must redispatch the stranded waiting task", 2L in harness.downloader.started)
+            assertEquals(TaskStatus.Completed, harness.repo.byId(2)?.status)
+        }
+
+    @Test
     fun `a parsed task starts downloading even when the repository update is delayed`() = engineTest { harness ->
         harness.repo.emitOnCompleteResolve = false
         harness.repo.add(queuedTask(1))

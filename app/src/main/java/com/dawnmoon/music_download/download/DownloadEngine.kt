@@ -406,8 +406,9 @@ class DownloadEngine(
     /**
      * 由仓库状态与作业集合重新计算快照。
      *
-     * 会话计数只在引擎彻底空闲时归零；只要还有 Queued/Resolving/Waiting/Downloading 任务或
-     * 运行中下载作业，完成数就继续保留，便于界面展示“已完成 x / 共 y”。
+     * 会话计数只在引擎彻底空闲时归零，便于界面展示“已完成 x / 共 y”。待办判定只看引擎
+     * 实际能推进的工作：解析/下载队列、在途任务与运行中作业。被 [parsePaused]、[poolPaused]
+     * 搁置的 Queued/Waiting 任务需要用户恢复才能继续，因此不阻止空闲自停。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun refreshSnapshot() {
@@ -419,7 +420,13 @@ class DownloadEngine(
             it.status == TaskStatus.Resolving || it.status == TaskStatus.Downloading
         }
         val queuedWork = !parseQueue.isEmpty || !downloadQueue.isEmpty
-        val anyPending = queuedWork || tasks.any { it.status.isActive } || downloadJobs.isNotEmpty()
+        val pendingActive = activeCount > 0
+        // 暂停标志会让循环丢弃队列中的任务；这些滞留任务只能由用户的恢复操作推进，
+        // 因此不能算作引擎仍有待办工作，否则服务会被永久钉住无法空闲自停。
+        val pendingQueued = !parsePaused && tasks.any { it.status == TaskStatus.Queued }
+        val pendingWaiting = !poolPaused && tasks.any { it.status == TaskStatus.Waiting }
+        val anyPending = queuedWork || pendingActive || pendingQueued || pendingWaiting ||
+            downloadJobs.isNotEmpty()
         idle = !anyPending
 
         if (idle) {
