@@ -45,6 +45,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.dawnmoon.music_download.R
 import com.dawnmoon.music_download.domain.model.MusicQuality
+import com.dawnmoon.music_download.ui.history.ClearHistoryDialog
+import com.dawnmoon.music_download.ui.history.HistoryList
+import com.dawnmoon.music_download.ui.history.HistorySearch
 import com.dawnmoon.music_download.ui.viewmodel.TaskUiModel
 import com.dawnmoon.music_download.ui.viewmodel.WorkbenchTab
 import com.dawnmoon.music_download.ui.viewmodel.WorkbenchUiState
@@ -69,6 +72,11 @@ data class WorkbenchCallbacks(
     val onRetryAllFailed: () -> Unit = {},
     val onCancelAll: () -> Unit = {},
     val onOpenSettings: () -> Unit = {},
+    val onHistoryQueryChange: (String) -> Unit = {},
+    val onClearHistory: (Boolean) -> Unit = {},
+    val onOpen: (Long) -> Unit = {},
+    val onShare: (Long) -> Unit = {},
+    val onRedownload: (Long, MusicQuality) -> Unit = { _, _ -> },
 )
 
 /**
@@ -93,7 +101,12 @@ fun WorkbenchScreen(
                 title = { Text(stringResource(R.string.workbench_title)) },
                 actions = {
                     QuotaLabel(quota = state.quota)
-                    BatchActionsMenu(callbacks = callbacks)
+                    // 批量动作只作用于未完成任务；历史 Tab 的溢出菜单留给"清空历史"。
+                    if (state.selectedTab == WorkbenchTab.Completed) {
+                        HistoryMenu(callbacks = callbacks)
+                    } else {
+                        BatchActionsMenu(callbacks = callbacks)
+                    }
                     IconButton(onClick = callbacks.onOpenSettings) {
                         Icon(
                             imageVector = Icons.Default.Settings,
@@ -113,6 +126,12 @@ fun WorkbenchScreen(
         ) {
             LinkInputCard(state = state, callbacks = callbacks)
             TaskTabs(state = state, callbacks = callbacks)
+            if (state.selectedTab == WorkbenchTab.Completed) {
+                HistorySearch(
+                    query = state.historyQuery,
+                    onQueryChange = callbacks.onHistoryQueryChange,
+                )
+            }
             TaskList(state = state, callbacks = callbacks)
         }
     }
@@ -187,6 +206,41 @@ private fun BatchActionItem(
         text = { Text(stringResource(text)) },
         onClick = onClick,
     )
+}
+
+/** 已完成 Tab 的历史操作菜单；清空历史需要用户在弹窗中明确选择是否删除文件。 */
+@Composable
+private fun HistoryMenu(callbacks: WorkbenchCallbacks) {
+    var expanded by remember { mutableStateOf(false) }
+    var showClearDialog by remember { mutableStateOf(false) }
+
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = stringResource(R.string.history_action_content_description),
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            BatchActionItem(text = R.string.action_clear_history) {
+                expanded = false
+                showClearDialog = true
+            }
+        }
+    }
+
+    if (showClearDialog) {
+        ClearHistoryDialog(
+            onDismiss = { showClearDialog = false },
+            onConfirm = { deleteFiles ->
+                showClearDialog = false
+                callbacks.onClearHistory(deleteFiles)
+            },
+        )
+    }
 }
 
 @Composable
@@ -271,11 +325,16 @@ private fun TaskList(
     state: WorkbenchUiState,
     callbacks: WorkbenchCallbacks,
 ) {
-    val tasks = when (state.selectedTab) {
-        WorkbenchTab.InProgress -> state.inProgress
-        WorkbenchTab.Completed -> state.completed
+    if (state.selectedTab == WorkbenchTab.Completed) {
+        HistoryList(
+            tasks = state.completed,
+            query = state.historyQuery,
+            callbacks = callbacks,
+        )
+        return
     }
 
+    val tasks = state.inProgress
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -283,11 +342,7 @@ private fun TaskList(
     ) {
         if (tasks.isEmpty()) {
             item {
-                val message = when (state.selectedTab) {
-                    WorkbenchTab.InProgress -> R.string.empty_tasks
-                    WorkbenchTab.Completed -> R.string.empty_history
-                }
-                EmptyState(message = stringResource(message))
+                EmptyState(message = stringResource(R.string.empty_tasks))
             }
         } else {
             items(tasks, key = TaskUiModel::id) { task ->

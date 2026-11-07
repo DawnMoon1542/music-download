@@ -99,6 +99,12 @@ fun AppRoot(
                             onRetryAllFailed = workbenchViewModel::onRetryAllFailed,
                             onCancelAll = workbenchViewModel::onCancelAll,
                             onOpenSettings = { route = AppRoute.Settings },
+                            onHistoryQueryChange = workbenchViewModel::onHistoryQueryChange,
+                            onClearHistory = workbenchViewModel::onClearHistory,
+                            onOpen = workbenchViewModel::onOpen,
+                            onShare = workbenchViewModel::onShare,
+                            onRedownload = workbenchViewModel::onRedownload,
+                            onDelete = workbenchViewModel::onDelete,
                         ),
                     )
                 }

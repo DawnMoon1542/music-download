@@ -22,6 +22,7 @@ import com.dawnmoon.music_download.domain.model.FailureKind
 import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.Quota
 import com.dawnmoon.music_download.domain.model.ResolvedTrack
+import com.dawnmoon.music_download.domain.model.SongId
 import com.dawnmoon.music_download.domain.model.SongLink
 import com.dawnmoon.music_download.domain.model.TaskStatus
 import com.dawnmoon.music_download.domain.model.ThemeMode
@@ -406,6 +407,237 @@ class WorkbenchViewModelTest {
 
     // endregion
 
+    // region 历史操作
+
+    @Test
+    fun `opening a record without a media id reports the file missing`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(
+                task(id = 1L, status = TaskStatus.Completed, fileName = "a.mp3"),
+            )
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.events.test {
+                viewModel.onOpen(1L)
+                dispatcher.scheduler.runCurrent()
+                assertEquals("文件已不存在", awaitSnackbar())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `opening a record whose media row disappeared reports the file missing`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(
+                task(
+                    id = 1L,
+                    status = TaskStatus.Completed,
+                    fileName = "a.mp3",
+                    mediaStoreId = 42L,
+                ),
+            )
+            fileStore.missingMediaIds += 42L
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.events.test {
+                viewModel.onOpen(1L)
+                dispatcher.scheduler.runCurrent()
+                assertEquals("文件已不存在", awaitSnackbar())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `sharing a record without a media id reports the file missing`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(
+                task(id = 1L, status = TaskStatus.Completed, fileName = "a.mp3"),
+            )
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.events.test {
+                viewModel.onShare(1L)
+                dispatcher.scheduler.runCurrent()
+                assertEquals("文件已不存在", awaitSnackbar())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `redownload starts the engine when a new task is created`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(completedHistoryTask())
+            repo.enqueueLinksOutcome = enqueued(created = listOf(88L))
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.onRedownload(1L, MusicQuality.Lossless)
+            dispatcher.scheduler.runCurrent()
+
+            assertEquals(
+                listOf<SongLink>(SongLink.Direct("https://music.163.com/song?id=9001", SongId(9001L))),
+                repo.enqueuedLinks,
+            )
+            assertEquals(MusicQuality.Lossless, repo.enqueuedQuality)
+            assertEquals(1, engine.startCount)
+            assertEquals(listOf(88L), engine.requestedIds)
+        }
+
+    @Test
+    fun `redownload without an api key opens settings focused on the key field`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(completedHistoryTask())
+            repo.enqueueLinksOutcome = EnqueueOutcome.MissingApiKey(extractedCount = 1)
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.events.test {
+                viewModel.onRedownload(1L, MusicQuality.Lossless)
+                dispatcher.scheduler.runCurrent()
+                assertEquals(WorkbenchEvent.OpenSettings(focusKey = true), awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            assertEquals(0, engine.startCount)
+        }
+
+    @Test
+    fun `redownload reports an already queued song distinctly`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(completedHistoryTask())
+            repo.enqueueLinksOutcome = enqueued(duplicates = 1)
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.events.test {
+                viewModel.onRedownload(1L, MusicQuality.Lossless)
+                dispatcher.scheduler.runCurrent()
+                assertEquals("该歌曲已在下载队列中", awaitSnackbar())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            assertEquals(0, engine.startCount)
+        }
+
+    @Test
+    fun `redownload without a song id reports the task as unavailable`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(
+                task(id = 1L, status = TaskStatus.Completed, mediaStoreId = 42L),
+            )
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.events.test {
+                viewModel.onRedownload(1L, MusicQuality.Lossless)
+                dispatcher.scheduler.runCurrent()
+                assertEquals("无法重新下载该任务", awaitSnackbar())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            assertEquals(0, engine.startCount)
+        }
+
+    @Test
+    fun `deleting a record with its file keeps it when the file deletion fails`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(completedHistoryTask())
+            fileStore.failingDeleteIds += 42L
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.events.test {
+                viewModel.onDelete(1L, deleteFile = true)
+                dispatcher.scheduler.runCurrent()
+                assertEquals("文件删除失败，已保留记录", awaitSnackbar())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            assertEquals(listOf(1L), repo.completed.value.map { it.id })
+            assertTrue(fileStore.deletedIds.isEmpty())
+        }
+
+    @Test
+    fun `deleting only the record does not touch the file store`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(completedHistoryTask())
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.onDelete(1L, deleteFile = false)
+            dispatcher.scheduler.runCurrent()
+
+            assertTrue(repo.completed.value.isEmpty())
+            assertTrue(fileStore.deletedIds.isEmpty())
+        }
+
+    @Test
+    fun `a record deletion failure after the file deletion keeps the record and reports it`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(completedHistoryTask())
+            repo.deleteRecordFailure = IllegalStateException("database unavailable")
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.events.test {
+                viewModel.onDelete(1L, deleteFile = true)
+                dispatcher.scheduler.runCurrent()
+                assertEquals("文件删除失败，已保留记录", awaitSnackbar())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            assertEquals(listOf(1L), repo.completed.value.map { it.id })
+            assertEquals(setOf(42L), fileStore.deletedIds)
+        }
+
+    @Test
+    fun `clearing history with files reports the number of retained records`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(
+                completedHistoryTask(id = 1L, mediaStoreId = 11L),
+                completedHistoryTask(id = 2L, mediaStoreId = 12L),
+            )
+            fileStore.failingDeleteIds += 12L
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.events.test {
+                viewModel.onClearHistory(deleteFiles = true)
+                dispatcher.scheduler.runCurrent()
+                val message = awaitSnackbar()
+                assertTrue(message.contains("1"))
+                assertTrue(message.contains("保留"))
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            assertEquals(listOf(2L), repo.completed.value.map { it.id })
+        }
+
+    @Test
+    fun `clearing history without files removes every record and reports success`() =
+        runTest(dispatcher.scheduler) {
+            repo.completed.value = listOf(
+                completedHistoryTask(id = 1L, mediaStoreId = 11L),
+                completedHistoryTask(id = 2L, mediaStoreId = 12L),
+            )
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.events.test {
+                viewModel.onClearHistory(deleteFiles = false)
+                dispatcher.scheduler.runCurrent()
+                assertEquals("已清空历史", awaitSnackbar())
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            assertTrue(repo.completed.value.isEmpty())
+        }
+
+    // endregion
+
     // region 失败文案
 
     @Test
@@ -582,6 +814,21 @@ class WorkbenchViewModelTest {
             failure = ApiFailure.LinkUnsupported("unsupported"),
         )
 
+    private fun completedHistoryTask(
+        id: Long = 1L,
+        mediaStoreId: Long? = 42L,
+    ): DownloadTask = task(
+        id = id,
+        status = TaskStatus.Completed,
+        title = "夏霞",
+        artist = "あたらよ",
+        fileName = "夏霞.mp3",
+        songId = 9001L,
+        sourceUrl = "https://music.163.com/song?id=9001",
+        mediaStoreId = mediaStoreId,
+        completedAt = 1_000,
+    )
+
     private fun historyTasks(): List<DownloadTask> = listOf(
         task(
             id = 1L,
@@ -615,6 +862,9 @@ class WorkbenchViewModelTest {
         title: String? = null,
         artist: String? = null,
         fileName: String? = null,
+        songId: Long? = null,
+        sourceUrl: String = "https://music.163.com/song?id=$id",
+        mediaStoreId: Long? = null,
         bytesDownloaded: Long = 0,
         failureKind: FailureKind? = null,
         failureMessage: String? = null,
@@ -622,8 +872,8 @@ class WorkbenchViewModelTest {
     ): DownloadTask =
         DownloadTask(
             id = id,
-            songId = null,
-            sourceUrl = "https://music.163.com/song?id=$id",
+            songId = songId?.let(::SongId),
+            sourceUrl = sourceUrl,
             requestedQuality = MusicQuality.Exhigh,
             actualQuality = null,
             title = title,
@@ -637,7 +887,7 @@ class WorkbenchViewModelTest {
             etag = null,
             bytesDownloaded = bytesDownloaded,
             status = status,
-            mediaStoreId = null,
+            mediaStoreId = mediaStoreId,
             fileName = fileName,
             failureKind = failureKind,
             failureMessage = failureMessage,
@@ -665,6 +915,18 @@ class WorkbenchViewModelTest {
         var lastEnqueueText: String? = null
         var lastEnqueueQuality: MusicQuality? = null
 
+        var enqueuedLinks: List<SongLink>? = null
+        var enqueuedQuality: MusicQuality? = null
+        var enqueueLinksOutcome: EnqueueOutcome = EnqueueOutcome.Enqueued(
+            created = emptyList(),
+            duplicates = 0,
+            ignoredUrlCount = 0,
+            failures = emptyList(),
+        )
+
+        var deleteRecordFailure: Throwable? = null
+        var deleteRecordsFailure: Throwable? = null
+
         override fun observeInProgress(): Flow<List<DownloadTask>> = inProgress
 
         override fun observeCompleted(): Flow<List<DownloadTask>> = completed
@@ -683,7 +945,11 @@ class WorkbenchViewModelTest {
         override suspend fun enqueueLinks(
             links: List<SongLink>,
             quality: MusicQuality,
-        ): EnqueueOutcome = error("unused")
+        ): EnqueueOutcome {
+            enqueuedLinks = links
+            enqueuedQuality = quality
+            return enqueueLinksOutcome
+        }
 
         override suspend fun markResolving(id: Long) = error("unused")
 
@@ -727,11 +993,20 @@ class WorkbenchViewModelTest {
 
         override suspend fun retry(id: Long) = error("unused")
 
-        override suspend fun deleteRecord(id: Long) = error("unused")
+        override suspend fun deleteRecord(id: Long) {
+            deleteRecordFailure?.let { throw it }
+            completed.value = completed.value.filterNot { it.id == id }
+        }
 
-        override suspend fun deleteRecords(ids: List<Long>) = error("unused")
+        override suspend fun deleteRecords(ids: List<Long>) {
+            deleteRecordsFailure?.let { throw it }
+            val removed = ids.toSet()
+            completed.value = completed.value.filterNot { it.id in removed }
+        }
 
-        override suspend fun clearCompleted() = error("unused")
+        override suspend fun clearCompleted() {
+            completed.value = emptyList()
+        }
 
         override suspend fun pauseAll() = error("unused")
 
@@ -822,6 +1097,14 @@ class WorkbenchViewModelTest {
 
     private class FakeTaskFileStore : TaskFileStore {
 
+        /** 这些媒体条目模拟已被外部删除，[sizeOf] 返回 -1。 */
+        val missingMediaIds = mutableSetOf<Long>()
+
+        /** 这些媒体条目模拟删除失败，[deleteById] 返回 false。 */
+        val failingDeleteIds = mutableSetOf<Long>()
+
+        val deletedIds = mutableSetOf<Long>()
+
         override suspend fun createPending(displayName: String, mimeType: String): CreatedFile =
             error("unused")
 
@@ -833,11 +1116,16 @@ class WorkbenchViewModelTest {
 
         override suspend fun delete(file: CreatedFile) = error("unused")
 
-        override suspend fun sizeOf(file: CreatedFile): Long = error("unused")
+        override suspend fun sizeOf(file: CreatedFile): Long =
+            if (file.mediaStoreId in missingMediaIds) -1L else 1_000L
 
         override suspend fun md5Of(file: CreatedFile): String = error("unused")
 
-        override suspend fun deleteById(mediaStoreId: Long): Boolean = error("unused")
+        override suspend fun deleteById(mediaStoreId: Long): Boolean {
+            if (mediaStoreId in failingDeleteIds) return false
+            deletedIds += mediaStoreId
+            return true
+        }
     }
 
     private class FakeQuotaStore : QuotaStore {

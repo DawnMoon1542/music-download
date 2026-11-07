@@ -10,13 +10,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -31,10 +38,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.dawnmoon.music_download.R
+import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.ui.common.FileInfoFormatter
 import com.dawnmoon.music_download.ui.viewmodel.TaskUiModel
 import kotlin.math.roundToInt
@@ -42,13 +51,15 @@ import kotlin.math.roundToInt
 /**
  * 单个任务卡片。
  *
- * 动作按钮完全由 [TaskUiModel] 的 can* 字段驱动，界面不推断任务状态；
+ * 进行中任务的按钮由 [TaskUiModel] 的 can* 字段驱动，界面不推断任务状态；
+ * 历史 Tab 通过 [isCompleted] 切换为播放、分享、重新下载与删除动作。
  * 失败卡片只有在存在服务端原文时才可点击展开，避免普通卡片出现无响应的点击区域。
  */
 @Composable
 fun TaskCard(
     task: TaskUiModel,
     callbacks: WorkbenchCallbacks,
+    isCompleted: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember(task.id) { mutableStateOf(false) }
@@ -105,7 +116,7 @@ fun TaskCard(
                 )
             }
 
-            ActionsRow(task = task, callbacks = callbacks)
+            ActionsRow(task = task, callbacks = callbacks, isCompleted = isCompleted)
         }
     }
 }
@@ -219,7 +230,13 @@ private fun MetaRow(task: TaskUiModel) {
 private fun ActionsRow(
     task: TaskUiModel,
     callbacks: WorkbenchCallbacks,
+    isCompleted: Boolean,
 ) {
+    if (isCompleted) {
+        CompletedActionsRow(task = task, callbacks = callbacks)
+        return
+    }
+
     val hasActions = task.canPause || task.canResume || task.canRetry ||
         task.canCancel || task.canDelete
     if (!hasActions) return
@@ -246,6 +263,115 @@ private fun ActionsRow(
             }
         }
     }
+}
+
+/** 已完成卡片：播放、分享以及"重新下载/删除"溢出菜单。 */
+@Composable
+private fun CompletedActionsRow(
+    task: TaskUiModel,
+    callbacks: WorkbenchCallbacks,
+) {
+    var menuExpanded by remember(task.id) { mutableStateOf(false) }
+    var showQualityDialog by remember(task.id) { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        TaskAction(stringResource(R.string.action_play)) { callbacks.onOpen(task.id) }
+        TaskAction(stringResource(R.string.action_share)) { callbacks.onShare(task.id) }
+        Box {
+            IconButton(onClick = { menuExpanded = true }) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = stringResource(R.string.more_actions_content_description),
+                )
+            }
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.action_redownload)) },
+                    onClick = {
+                        menuExpanded = false
+                        showQualityDialog = true
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.action_delete_record)) },
+                    onClick = {
+                        menuExpanded = false
+                        callbacks.onDelete(task.id, false)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.action_delete_record_and_file)) },
+                    onClick = {
+                        menuExpanded = false
+                        callbacks.onDelete(task.id, true)
+                    },
+                )
+            }
+        }
+    }
+
+    if (showQualityDialog) {
+        RedownloadQualityDialog(
+            onDismiss = { showQualityDialog = false },
+            onConfirm = { quality ->
+                showQualityDialog = false
+                callbacks.onRedownload(task.id, quality)
+            },
+        )
+    }
+}
+
+/** 重新下载前的音质单选；确认后才创建新任务。 */
+@Composable
+private fun RedownloadQualityDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (MusicQuality) -> Unit,
+) {
+    var selected by remember { mutableStateOf(MusicQuality.default) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.quality_label)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                MusicQuality.entries.forEach { quality ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = selected == quality,
+                                role = Role.RadioButton,
+                                onClick = { selected = quality },
+                            )
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = selected == quality, onClick = null)
+                        Text(
+                            text = quality.label,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(selected) }) {
+                Text(stringResource(R.string.action_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
 }
 
 /** 文本动作按钮；TextButton 自带 48dp 最小触控目标。 */

@@ -1,6 +1,8 @@
 package com.dawnmoon.music_download.ui.viewmodel
 
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -15,10 +17,14 @@ import com.dawnmoon.music_download.domain.model.FailureKind
 import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.Quota
 import com.dawnmoon.music_download.domain.model.TaskStatus
+import com.dawnmoon.music_download.download.CreatedFile
 import com.dawnmoon.music_download.download.DownloadController
 import com.dawnmoon.music_download.download.EngineSnapshot
 import com.dawnmoon.music_download.download.TaskFileStore
 import com.dawnmoon.music_download.ui.common.FileInfoFormatter
+import com.dawnmoon.music_download.ui.history.HistoryActions
+import com.dawnmoon.music_download.ui.history.RedownloadResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -43,12 +49,14 @@ class WorkbenchViewModel(
     private val repo: TaskRepository,
     private val settings: AppSettings,
     private val engine: DownloadController,
-    @Suppress("unused") private val fileStore: TaskFileStore,
+    private val fileStore: TaskFileStore,
     private val quotaStore: QuotaStore,
     private val appContext: Context,
     private val clock: AppClock,
     private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) : ViewModel() {
+
+    private val historyActions = HistoryActions(repo, fileStore, engine, appContext)
 
     private val input = MutableStateFlow("")
 
@@ -222,6 +230,121 @@ class WorkbenchViewModel(
 
     fun onRetryAllFailed() {
         engine.retryAllFailed()
+    }
+
+    /** 用系统播放器打开完成文件；文件已不存在时提示并保留记录。 */
+    fun onOpen(id: Long) {
+        viewModelScope.launch {
+            val task = repo.byId(id) ?: return@launch
+            launchHistoryIntent(
+                existingMediaIntent(task) { mediaStoreId ->
+                    HistoryActions.openIntent(mediaStoreId)
+                },
+            )
+        }
+    }
+
+    /** 分享完成文件；文件已不存在时提示并保留记录。 */
+    fun onShare(id: Long) {
+        viewModelScope.launch {
+            val task = repo.byId(id) ?: return@launch
+            launchHistoryIntent(
+                existingMediaIntent(task) { mediaStoreId ->
+                    HistoryActions.shareIntent(mediaStoreId, task.title ?: task.fileName)
+                },
+            )
+        }
+    }
+
+    /** 按选定音质重新创建下载任务；缺 Key 时引导到设置，其余失败给出区分后的提示。 */
+    fun onRedownload(id: Long, quality: MusicQuality) {
+        viewModelScope.launch {
+            val task = repo.byId(id) ?: return@launch
+            when (historyActions.redownload(task, quality)) {
+                RedownloadResult.Started -> Unit
+
+                RedownloadResult.MissingApiKey ->
+                    eventChannel.trySend(WorkbenchEvent.OpenSettings(focusKey = true))
+
+                RedownloadResult.AlreadyQueued -> eventChannel.trySend(
+                    WorkbenchEvent.Snackbar(text(R.string.history_redownload_duplicate)),
+                )
+
+                RedownloadResult.MissingSongId, RedownloadResult.Failed -> eventChannel.trySend(
+                    WorkbenchEvent.Snackbar(text(R.string.history_redownload_unavailable)),
+                )
+            }
+        }
+    }
+
+    /** 删除历史记录；删除文件或记录失败时由 [HistoryActions] 保留记录并在此提示。 */
+    fun onDelete(id: Long, deleteFile: Boolean) {
+        viewModelScope.launch {
+            val task = repo.byId(id) ?: return@launch
+            if (!historyActions.delete(task, deleteFile)) {
+                eventChannel.trySend(
+                    WorkbenchEvent.Snackbar(text(R.string.history_delete_file_failed)),
+                )
+            }
+        }
+    }
+
+    /** 清空历史；删除失败而保留的条目汇总为一条提示。 */
+    fun onClearHistory(deleteFiles: Boolean) {
+        viewModelScope.launch {
+            val tasks = repo.observeCompleted().first()
+            val failedCount = historyActions.clearHistory(tasks, deleteFiles)
+            val message = if (failedCount > 0) {
+                text(R.string.history_clear_failed_count, failedCount)
+            } else {
+                text(R.string.history_cleared)
+            }
+            eventChannel.trySend(WorkbenchEvent.Snackbar(message))
+        }
+    }
+
+    /**
+     * 只为仍然存在的媒体条目构造 Intent。
+     *
+     * MediaStore 行可能已被外部应用删除，此时 content URI 虽然格式正确却没有目标，
+     * 启动后只会看到播放器报错；这里先用文件存储确认条目存在，缺失时走统一的提示。
+     */
+    private suspend fun existingMediaIntent(
+        task: DownloadTask,
+        build: (mediaStoreId: Long) -> Intent?,
+    ): Intent? {
+        val mediaStoreId = task.mediaStoreId ?: return null
+        val exists = try {
+            fileStore.sizeOf(CreatedFile(mediaStoreId, task.fileName.orEmpty())) >= 0L
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (_: Exception) {
+            false
+        }
+        return if (exists) build(mediaStoreId) else null
+    }
+
+    /**
+     * 从 ViewModel 启动外部 Intent。
+     *
+     * Intent 为 null 说明媒体条目已随文件消失，此时只提示，不删除记录，让用户仍可选择
+     * "仅删记录"。设备没有可处理 ACTION_VIEW/ACTION_SEND 的应用时同样按文件不可用提示，
+     * 避免外部 Intent 直接让应用崩溃。
+     */
+    private fun launchHistoryIntent(intent: Intent?) {
+        if (intent == null) {
+            showFileMissing()
+            return
+        }
+        try {
+            appContext.startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            showFileMissing()
+        }
+    }
+
+    private fun showFileMissing() {
+        eventChannel.trySend(WorkbenchEvent.Snackbar(text(R.string.history_file_missing)))
     }
 
     private suspend fun handleEnqueued(outcome: EnqueueOutcome.Enqueued) {
