@@ -1,5 +1,7 @@
 package com.dawnmoon.music_download.ui
 
+import kotlinx.coroutines.flow.map
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import android.content.Context
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -41,6 +43,8 @@ import kotlinx.coroutines.flow.StateFlow
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+
+private const val TEST_API_BASE_URL = "https://api.test"
 
 /**
  * 错误路径的界面文案。
@@ -216,13 +220,14 @@ class ErrorStateScreenTest {
     }
 
     private class FakeAppSettings : AppSettings {
-        override val apiKey: Flow<String?> = MutableStateFlow(null)
+        override val apiCredentials: Flow<ApiCredentials?> =
+            MutableStateFlow(null).map { key -> key?.let { ApiCredentials(TEST_API_BASE_URL, it) } }
         override val defaultQuality: Flow<MusicQuality> = MutableStateFlow(MusicQuality.Exhigh)
         override val maxConcurrentDownloads: Flow<Int> = MutableStateFlow(3)
         override val themeMode: Flow<ThemeMode> = MutableStateFlow(ThemeMode.System)
         override val notificationAsked: Flow<Boolean> = MutableStateFlow(true)
 
-        override suspend fun setApiKey(value: String) = Unit
+        override suspend fun setApiCredentials(value: ApiCredentials) = Unit
 
         override suspend fun setDefaultQuality(value: MusicQuality) = Unit
 

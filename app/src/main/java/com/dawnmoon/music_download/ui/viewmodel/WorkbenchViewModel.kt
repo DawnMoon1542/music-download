@@ -65,8 +65,7 @@ class WorkbenchViewModel(
     /** 用户在当前页面选中的音质；null 表示跟随设置中的默认值。 */
     private val qualityOverride = MutableStateFlow<MusicQuality?>(null)
 
-    private val selectedTab = MutableStateFlow(WorkbenchTab.InProgress)
-    private val historyQuery = MutableStateFlow("")
+    private val query = MutableStateFlow("")
     private val isEnqueuing = MutableStateFlow(false)
 
     /** 只包含本轮有效的下载速度；不存在或回退期间任务不会出现在此表。 */
@@ -96,12 +95,11 @@ class WorkbenchViewModel(
 
     private val localState = combine(
         input,
-        selectedTab,
-        historyQuery,
+        query,
         isEnqueuing,
         qualityOverride,
-    ) { input, tab, query, enqueuing, override ->
-        LocalState(input, tab, query, enqueuing, override)
+    ) { input, query, enqueuing, override ->
+        LocalState(input, query, enqueuing, override)
     }
 
     private val localStateWithQuality = combine(
@@ -117,16 +115,16 @@ class WorkbenchViewModel(
         speeds,
     ) { tasks, local, speedByTask ->
         val quality = local.qualityOverride ?: local.defaultQuality
+        val all = (tasks.inProgress + tasks.completed).map { it.toUiModel(speedByTask) }
         WorkbenchUiState(
             input = local.input,
             selectedQuality = quality,
             quota = tasks.quota,
-            inProgress = tasks.inProgress.map { it.toUiModel(speedByTask) },
-            completed = tasks.completed
-                .filter { it.matchesQuery(local.historyQuery) }
-                .map { it.toUiModel(emptyMap()) },
-            selectedTab = local.selectedTab,
-            historyQuery = local.historyQuery,
+            tasks = all
+                .filter { it.matchesQuery(local.query) }
+                .sortedWith(TASK_ORDER),
+            statusCounts = all.groupingBy { it.statusGroup }.eachCount(),
+            query = local.query,
             isEnqueuing = local.isEnqueuing,
             engine = tasks.engine,
         )
@@ -137,10 +135,9 @@ class WorkbenchViewModel(
             input = "",
             selectedQuality = MusicQuality.default,
             quota = null,
-            inProgress = emptyList(),
-            completed = emptyList(),
-            selectedTab = WorkbenchTab.InProgress,
-            historyQuery = "",
+            tasks = emptyList(),
+            statusCounts = emptyMap(),
+            query = "",
             isEnqueuing = false,
             engine = null,
         ),
@@ -163,12 +160,8 @@ class WorkbenchViewModel(
         qualityOverride.value = quality
     }
 
-    fun onTabChange(tab: WorkbenchTab) {
-        selectedTab.value = tab
-    }
-
-    fun onHistoryQueryChange(query: String) {
-        historyQuery.value = query
+    fun onQueryChange(value: String) {
+        query.value = value
     }
 
     /**
@@ -197,7 +190,6 @@ class WorkbenchViewModel(
                     is EnqueueResult.Enqueued -> {
                         if (result.outcome.created.isNotEmpty()) {
                             input.value = ""
-                            selectedTab.value = WorkbenchTab.InProgress
                         }
                         eventChannel.trySend(WorkbenchEvent.Snackbar(result.message))
                         if (result.notificationPermissionNeeded) {
@@ -418,17 +410,20 @@ class WorkbenchViewModel(
             artworkUrl = artworkUrl,
             qualityLabel = (actualQuality ?: requestedQuality).label,
             statusLabel = statusLabel(),
+            statusGroup = statusGroup(),
             progress = if (isDownloading) {
                 FileInfoFormatter.formatProgress(bytesDownloaded, sizeBytes)
             } else {
                 null
             },
+            isResolving = status == TaskStatus.Resolving,
             bytesDownloaded = bytesDownloaded.takeIf { it > 0L },
             totalBytes = sizeBytes,
             speedBytesPerSecond = if (isDownloading) speedByTask[id] else null,
             failureKind = failureKind?.name,
             failureMessage = failureMessage,
             fileName = fileName,
+            createdAt = createdAt,
             completedAt = completedAt,
             canPause = status == TaskStatus.Downloading || status == TaskStatus.Resolving,
             canResume = status == TaskStatus.Paused,
@@ -441,6 +436,18 @@ class WorkbenchViewModel(
             canRetry = status == TaskStatus.Failed,
             canDelete = status == TaskStatus.Cancelled,
         )
+    }
+
+    private fun DownloadTask.statusGroup(): TaskStatusGroup = when (status) {
+        TaskStatus.Failed -> TaskStatusGroup.Failed
+        TaskStatus.Queued,
+        TaskStatus.Resolving,
+        TaskStatus.Waiting,
+        TaskStatus.Downloading,
+        TaskStatus.Paused,
+        -> TaskStatusGroup.Active
+        TaskStatus.Cancelled -> TaskStatusGroup.Cancelled
+        TaskStatus.Completed -> TaskStatusGroup.Completed
     }
 
     private fun DownloadTask.statusLabel(): String = when (status) {
@@ -484,10 +491,10 @@ class WorkbenchViewModel(
         }
     }
 
-    private fun DownloadTask.matchesQuery(query: String): Boolean {
+    private fun TaskUiModel.matchesQuery(query: String): Boolean {
         if (query.isBlank()) return true
-        return listOfNotNull(title, artist, fileName)
-            .any { it.contains(query, ignoreCase = true) }
+        return listOfNotNull(title, artist, fileName, sourceUrl)
+            .any { it.contains(query.trim(), ignoreCase = true) }
     }
 
     private fun text(resId: Int, vararg args: Any): String =
@@ -502,8 +509,7 @@ class WorkbenchViewModel(
 
     private data class LocalState(
         val input: String,
-        val selectedTab: WorkbenchTab,
-        val historyQuery: String,
+        val query: String,
         val isEnqueuing: Boolean,
         val qualityOverride: MusicQuality?,
         val defaultQuality: MusicQuality = MusicQuality.default,
@@ -514,6 +520,10 @@ class WorkbenchViewModel(
     private companion object {
         const val SPEED_SAMPLE_INTERVAL_MILLIS = 1_000L
         const val MILLIS_PER_SECOND = 1_000.0
+
+        /** 先按状态分组优先级（异常、进行中、已取消、已完成），同组内创建时间新的在前。 */
+        val TASK_ORDER: Comparator<TaskUiModel> = compareBy<TaskUiModel> { it.statusGroup.ordinal }
+            .thenByDescending { it.createdAt }
 
         val FAILURE_WITH_MESSAGE: Set<FailureKind> = setOf(
             FailureKind.Forbidden,

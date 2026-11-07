@@ -99,7 +99,7 @@ interface TaskRepository {
 /** 入队结果；`created` 非空时由调用方启动下载引擎。 */
 sealed interface EnqueueOutcome {
 
-    /** 未配置 API Key；[extractedCount] 是提取到的链接数。 */
+    /** 未配置 API 地址或 Key；[extractedCount] 是提取到的链接数。 */
     data class MissingApiKey(val extractedCount: Int) : EnqueueOutcome
 
     /** 文本中没有可识别的歌曲链接；空链接列表入队也返回该结果并计 0 个被忽略的 URL。 */

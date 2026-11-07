@@ -5,6 +5,13 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -90,7 +97,23 @@ fun AppRoot(
                     .fillMaxSize()
                     .padding(innerPadding),
             ) {
-                when (route) {
+                // M3 共享 X 轴转场：进入设置向左推进，返回时反向，淡入淡出叠加位移。
+                AnimatedContent(
+                    targetState = route,
+                    transitionSpec = {
+                        val forward = targetState == AppRoute.Settings
+                        val direction = if (forward) 1 else -1
+                        (
+                            slideInHorizontally(tween(TRANSITION_MILLIS)) { it / SLIDE_FRACTION * direction } +
+                                fadeIn(tween(TRANSITION_MILLIS))
+                            ) togetherWith (
+                            slideOutHorizontally(tween(TRANSITION_MILLIS)) { -it / SLIDE_FRACTION * direction } +
+                                fadeOut(tween(TRANSITION_MILLIS / 2))
+                            )
+                    },
+                    label = "app_route",
+                ) { currentRoute ->
+                when (currentRoute) {
                     AppRoute.Workbench -> {
                         val workbenchViewModel: WorkbenchViewModel = viewModel(
                             factory = viewModelFactory,
@@ -117,7 +140,6 @@ fun AppRoot(
                             callbacks = WorkbenchCallbacks(
                                 onInputChange = workbenchViewModel::onInputChange,
                                 onQualityChange = workbenchViewModel::onQualityChange,
-                                onTabChange = workbenchViewModel::onTabChange,
                                 onEnqueue = workbenchViewModel::onEnqueue,
                                 onPause = workbenchViewModel::onPause,
                                 onResume = workbenchViewModel::onResume,
@@ -131,7 +153,7 @@ fun AppRoot(
                                     focusKeyOnOpen = false
                                     route = AppRoute.Settings
                                 },
-                                onHistoryQueryChange = workbenchViewModel::onHistoryQueryChange,
+                                onQueryChange = workbenchViewModel::onQueryChange,
                                 onClearHistory = workbenchViewModel::onClearHistory,
                                 onOpen = workbenchViewModel::onOpen,
                                 onShare = workbenchViewModel::onShare,
@@ -163,6 +185,7 @@ fun AppRoot(
                         SettingsScreen(
                             state = state,
                             callbacks = SettingsCallbacks(
+                                onUrlChange = settingsViewModel::onUrlChange,
                                 onKeyChange = settingsViewModel::onKeyChange,
                                 onSaveKey = settingsViewModel::onSaveKey,
                                 onDefaultQualityChange =
@@ -179,9 +202,14 @@ fun AppRoot(
                         )
                     }
                 }
+                }
             }
         }
     }
 }
 
 private const val LOG_TAG = "AppRoot"
+
+private const val TRANSITION_MILLIS = 300
+
+private const val SLIDE_FRACTION = 5

@@ -2,15 +2,12 @@ package com.dawnmoon.music_download.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.ThemeMode
 import com.dawnmoon.music_download.ui.theme.MusicDownloadTheme
-import com.dawnmoon.music_download.ui.viewmodel.WorkbenchTab
-import com.dawnmoon.music_download.ui.viewmodel.WorkbenchUiState
 import com.dawnmoon.music_download.ui.workbench.WorkbenchCallbacks
 import com.dawnmoon.music_download.ui.workbench.WorkbenchScreen
 import org.junit.Assert.assertEquals
@@ -19,7 +16,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * 工作台溢出菜单的批量操作：菜单提供全部批量动作，"全部取消"必须经过确认。
+ * 工作台溢出菜单的批量操作：菜单提供全部批量动作与清空已完成记录，"全部取消"必须经过确认。
  */
 @RunWith(AndroidJUnit4::class)
 class BatchActionsTest {
@@ -31,9 +28,9 @@ class BatchActionsTest {
     fun overflowMenuOffersEveryBatchAction() {
         setWorkbench()
 
-        composeRule.onNodeWithContentDescription("更多操作").performClick()
+        composeRule.onNodeWithTag("batch_actions_menu").performClick()
 
-        listOf("全部暂停", "全部继续", "全部重试失败", "全部取消").forEach { label ->
+        listOf("全部暂停", "全部继续", "全部重试失败", "全部取消", "清空已完成记录").forEach { label ->
             composeRule.onNodeWithText(label).assertIsDisplayed()
         }
     }
@@ -45,7 +42,7 @@ class BatchActionsTest {
             callbacks = WorkbenchCallbacks(onCancelAll = { cancelAllCalls += 1 }),
         )
 
-        composeRule.onNodeWithContentDescription("更多操作").performClick()
+        composeRule.onNodeWithTag("batch_actions_menu").performClick()
         composeRule.onNodeWithText("全部取消").performClick()
 
         // 菜单选择只打开确认框，此时不能已经触发取消。
@@ -64,7 +61,7 @@ class BatchActionsTest {
             callbacks = WorkbenchCallbacks(onCancelAll = { cancelAllCalls += 1 }),
         )
 
-        composeRule.onNodeWithContentDescription("更多操作").performClick()
+        composeRule.onNodeWithTag("batch_actions_menu").performClick()
         composeRule.onNodeWithText("全部取消").performClick()
         composeRule.onNodeWithText("取消").performClick()
 
@@ -76,17 +73,7 @@ class BatchActionsTest {
         composeRule.setContent {
             MusicDownloadTheme(themeMode = ThemeMode.Light) {
                 WorkbenchScreen(
-                    state = WorkbenchUiState(
-                        input = "",
-                        selectedQuality = MusicQuality.Exhigh,
-                        quota = null,
-                        inProgress = emptyList(),
-                        completed = emptyList(),
-                        selectedTab = WorkbenchTab.InProgress,
-                        historyQuery = "",
-                        isEnqueuing = false,
-                        engine = null,
-                    ),
+                    state = workbenchState(),
                     callbacks = callbacks,
                 )
             }

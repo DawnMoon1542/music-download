@@ -7,9 +7,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithContentDescription
-import androidx.compose.ui.test.onLast
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -21,7 +18,7 @@ import com.dawnmoon.music_download.domain.model.ThemeMode
 import com.dawnmoon.music_download.ui.history.HistoryActions
 import com.dawnmoon.music_download.ui.theme.MusicDownloadTheme
 import com.dawnmoon.music_download.ui.viewmodel.TaskUiModel
-import com.dawnmoon.music_download.ui.viewmodel.WorkbenchTab
+import com.dawnmoon.music_download.ui.viewmodel.TaskStatusGroup
 import com.dawnmoon.music_download.ui.viewmodel.WorkbenchUiState
 import com.dawnmoon.music_download.ui.workbench.WorkbenchCallbacks
 import com.dawnmoon.music_download.ui.workbench.WorkbenchScreen
@@ -82,7 +79,7 @@ class HistoryScreenTest {
         var state by mutableStateOf(
             historyState(
                 completed = listOf(completedTask(1L)),
-                historyQuery = "",
+                query = "",
             ),
         )
         composeRule.setContent {
@@ -90,15 +87,15 @@ class HistoryScreenTest {
                 WorkbenchScreen(
                     state = state,
                     callbacks = WorkbenchCallbacks(
-                        onHistoryQueryChange = { state = state.copy(historyQuery = it) },
+                        onQueryChange = { state = state.copy(query = it) },
                     ),
                 )
             }
         }
 
-        composeRule.onNodeWithTag("history_search").performTextInput("夏霞")
+        composeRule.onNodeWithTag("task_search").performTextInput("夏霞")
 
-        composeRule.runOnIdle { assertEquals("夏霞", state.historyQuery) }
+        composeRule.runOnIdle { assertEquals("夏霞", state.query) }
     }
 
     @Test
@@ -106,12 +103,13 @@ class HistoryScreenTest {
         setHistory(
             state = historyState(
                 completed = emptyList(),
-                historyQuery = "不存在",
+                query = "不存在",
+                statusCounts = mapOf(TaskStatusGroup.Completed to 1),
             ),
         )
 
-        composeRule.onNodeWithText("没有匹配的历史记录").assertIsDisplayed()
-        composeRule.onNodeWithText("暂无历史任务").assertDoesNotExist()
+        composeRule.onNodeWithText("没有匹配的任务").assertIsDisplayed()
+        composeRule.onNodeWithText("暂无下载任务", substring = true).assertDoesNotExist()
     }
 
     // endregion
@@ -126,8 +124,8 @@ class HistoryScreenTest {
             callbacks = WorkbenchCallbacks(onClearHistory = { deleteFiles = it }),
         )
 
-        composeRule.onNodeWithContentDescription("历史操作").performClick()
-        composeRule.onNodeWithText("清空历史").performClick()
+        composeRule.onNodeWithTag("batch_actions_menu").performClick()
+        composeRule.onNodeWithText("清空已完成记录").performClick()
 
         composeRule.onNodeWithText("仅清空记录").assertIsDisplayed()
         composeRule.onNodeWithText("同时删除文件").assertIsDisplayed()
@@ -145,8 +143,8 @@ class HistoryScreenTest {
             callbacks = WorkbenchCallbacks(onClearHistory = { deleteFiles = it }),
         )
 
-        composeRule.onNodeWithContentDescription("历史操作").performClick()
-        composeRule.onNodeWithText("清空历史").performClick()
+        composeRule.onNodeWithTag("batch_actions_menu").performClick()
+        composeRule.onNodeWithText("清空已完成记录").performClick()
         composeRule.onNodeWithText("同时删除文件").performClick()
         composeRule.onNodeWithText("确认").performClick()
 
@@ -197,7 +195,7 @@ class HistoryScreenTest {
             ),
         )
 
-        composeRule.onAllNodesWithContentDescription("更多操作").onLast().performClick()
+        composeRule.onNodeWithTag("task_more_actions").performClick()
         composeRule.onNodeWithText("按音质重新下载").performClick()
         composeRule.onNodeWithText("无损").performClick()
         composeRule.onNodeWithText("确认").performClick()
@@ -218,11 +216,11 @@ class HistoryScreenTest {
             ),
         )
 
-        composeRule.onAllNodesWithContentDescription("更多操作").onLast().performClick()
+        composeRule.onNodeWithTag("task_more_actions").performClick()
         composeRule.onNodeWithText("删除记录").performClick()
         composeRule.runOnIdle { assertEquals(listOf(42L to false), deletions) }
 
-        composeRule.onAllNodesWithContentDescription("更多操作").onLast().performClick()
+        composeRule.onNodeWithTag("task_more_actions").performClick()
         composeRule.onNodeWithText("删除记录与文件").performClick()
         composeRule.runOnIdle {
             assertEquals(listOf(42L to false, 42L to true), deletions)
@@ -244,41 +242,23 @@ class HistoryScreenTest {
 
     private fun historyState(
         completed: List<TaskUiModel>,
-        historyQuery: String = "",
-    ): WorkbenchUiState = WorkbenchUiState(
-        input = "",
-        selectedQuality = MusicQuality.Exhigh,
-        quota = null,
-        inProgress = emptyList(),
-        completed = completed,
-        selectedTab = WorkbenchTab.Completed,
-        historyQuery = historyQuery,
-        isEnqueuing = false,
-        engine = null,
-    )
+        query: String = "",
+        statusCounts: Map<TaskStatusGroup, Int>? = null,
+    ): WorkbenchUiState = if (statusCounts == null) {
+        workbenchState(tasks = completed, query = query)
+    } else {
+        workbenchState(tasks = completed, query = query, statusCounts = statusCounts)
+    }
 
-    private fun completedTask(id: Long): TaskUiModel = TaskUiModel(
+    private fun completedTask(id: Long): TaskUiModel = testTask(
         id = id,
-        songId = id + 1L,
-        sourceUrl = "https://music.163.com/song?id=${id + 1L}",
-        mediaStoreId = 42L,
         title = "夏霞",
         artist = "あたらよ",
-        artworkUrl = null,
-        qualityLabel = MusicQuality.Exhigh.label,
         statusLabel = "已完成",
-        progress = null,
+        mediaStoreId = 42L,
         bytesDownloaded = 1_000L,
         totalBytes = 1_000L,
-        speedBytesPerSecond = null,
-        failureKind = null,
-        failureMessage = null,
         fileName = "夏霞.mp3",
         completedAt = 1_000L,
-        canPause = false,
-        canResume = false,
-        canCancel = false,
-        canRetry = false,
-        canDelete = false,
     )
 }

@@ -4,10 +4,12 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dawnmoon.music_download.R
+import com.dawnmoon.music_download.data.remote.ApiBaseUrl
 import com.dawnmoon.music_download.data.repository.AppSettings
 import com.dawnmoon.music_download.data.repository.KeyValidator
 import com.dawnmoon.music_download.data.repository.QuotaStore
 import com.dawnmoon.music_download.data.repository.TaskRepository
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.Quota
 import com.dawnmoon.music_download.domain.model.ThemeMode
@@ -23,7 +25,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** API Key 的本地与联网校验状态。 */
+/** API 地址与 Key 的本地与联网校验状态。 */
 sealed interface KeyStatus {
 
     /** 尚无校验结果；用户尚未提交或已修改输入。 */
@@ -36,7 +38,7 @@ sealed interface KeyStatus {
     data object Valid : KeyStatus
 
     /**
-     * Key 确定无效，不应保存。
+     * 地址或 Key 确定无效，不应保存。
      *
      * 本地格式错误没有服务端原文，用 [messageRes] 交给界面取资源；服务端返回的无效原因
      * 放在 [message] 中，两者互斥。
@@ -46,7 +48,7 @@ sealed interface KeyStatus {
         @StringRes val messageRes: Int? = null,
     ) : KeyStatus
 
-    /** 无法判定 Key 是否有效；Key 已保存，界面展示警告。 */
+    /** 无法判定凭据是否有效；凭据已保存，界面展示警告。 */
     data class NetworkError(val message: String) : KeyStatus
 }
 
@@ -64,8 +66,8 @@ sealed interface SettingsEvent {
  * 设置页的状态编排。
  *
  * 音质、并发数与主题只读取 [AppSettings] 的 Flow，写入后由持久化层回流，避免界面状态
- * 与 DataStore 出现两份互相竞争的事实。Key 校验先做本地格式检查，任何本地非法的输入
- * 都不会消耗一次联网额度。
+ * 与 DataStore 出现两份互相竞争的事实。地址与 Key 必须一起提交，校验先做本地格式检查，
+ * 任何本地非法的输入都不会消耗一次联网额度。
  *
  * 清空历史通过注入的 [HistoryActions] 完成，与工作台历史 Tab 共用同一实现。
  */
@@ -79,7 +81,9 @@ class SettingsViewModel(
 
     /** 设置页的完整界面状态。 */
     data class State(
+        val apiUrlDraft: String,
         val apiKeyDraft: String,
+        val savedApiUrl: String?,
         val savedKeyMasked: String?,
         val keyStatus: KeyStatus,
         val defaultQuality: MusicQuality,
@@ -88,6 +92,7 @@ class SettingsViewModel(
         val quota: Quota?,
     )
 
+    private val apiUrlDraft = MutableStateFlow("")
     private val apiKeyDraft = MutableStateFlow("")
     private val keyStatus = MutableStateFlow<KeyStatus>(KeyStatus.Idle)
     private val eventChannel = Channel<SettingsEvent>(Channel.BUFFERED)
@@ -96,24 +101,28 @@ class SettingsViewModel(
     val events: Flow<SettingsEvent> = eventChannel.receiveAsFlow()
 
     private val persisted = combine(
-        settings.apiKey,
+        settings.apiCredentials,
         settings.defaultQuality,
         settings.maxConcurrentDownloads,
         settings.themeMode,
-    ) { apiKey, defaultQuality, concurrency, themeMode ->
-        PersistedSettings(apiKey, defaultQuality, concurrency, themeMode)
+    ) { credentials, defaultQuality, concurrency, themeMode ->
+        PersistedSettings(credentials, defaultQuality, concurrency, themeMode)
     }
+
+    private val drafts = combine(apiUrlDraft, apiKeyDraft) { url, key -> url to key }
 
     val state: StateFlow<State> = combine(
         persisted,
         quotaStore.quota,
-        apiKeyDraft,
+        drafts,
         keyStatus,
-    ) { persistedSettings, quota, draft, status ->
+    ) { persistedSettings, quota, (urlDraft, keyDraft), status ->
         State(
-            apiKeyDraft = draft,
+            apiUrlDraft = urlDraft,
+            apiKeyDraft = keyDraft,
+            savedApiUrl = persistedSettings.credentials?.baseUrl,
             // 已保存的 Key 只以掩码形式展示，明文永不回填输入框。
-            savedKeyMasked = persistedSettings.apiKey?.let(::maskKey),
+            savedKeyMasked = persistedSettings.credentials?.apiKey?.let(::maskKey),
             keyStatus = status,
             defaultQuality = persistedSettings.defaultQuality,
             concurrency = persistedSettings.concurrency,
@@ -124,7 +133,9 @@ class SettingsViewModel(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = State(
+            apiUrlDraft = "",
             apiKeyDraft = "",
+            savedApiUrl = null,
             savedKeyMasked = null,
             keyStatus = KeyStatus.Idle,
             defaultQuality = MusicQuality.default,
@@ -134,40 +145,63 @@ class SettingsViewModel(
         ),
     )
 
+    init {
+        // 地址不是机密，用已保存的值预填，用户只换 Key 时不必重新输入地址。
+        viewModelScope.launch {
+            val saved = settings.apiCredentials.first()?.baseUrl ?: return@launch
+            if (apiUrlDraft.value.isEmpty()) apiUrlDraft.value = saved
+        }
+    }
+
+    fun onUrlChange(value: String) {
+        apiUrlDraft.value = value
+        resetStatusAfterEdit()
+    }
+
     fun onKeyChange(value: String) {
         apiKeyDraft.value = value
-        // 修改输入后旧的校验结论不再代表当前内容；校验中保持 Validating 以保证按钮禁用。
+        resetStatusAfterEdit()
+    }
+
+    /** 修改输入后旧的校验结论不再代表当前内容；校验中保持 Validating 以保证按钮禁用。 */
+    private fun resetStatusAfterEdit() {
         if (keyStatus.value !is KeyStatus.Validating) {
             keyStatus.value = KeyStatus.Idle
         }
     }
 
     /**
-     * 保存并校验当前草稿。
+     * 保存并校验当前的地址与 Key 草稿。
      *
      * 本地格式非法时直接拒绝，不发起联网校验（每次校验都会消耗一次 API 额度）。
-     * `Indeterminate` 表示无法判断（网络、额度、限流），此时仍保存 Key，避免用户因临时
+     * `Indeterminate` 表示无法判断（网络、额度、限流），此时仍保存凭据，避免用户因临时
      * 故障丢失输入；界面据此展示警告而不是"无效"。
      */
     fun onSaveKey() {
         if (keyStatus.value is KeyStatus.Validating) return
-        val draft = apiKeyDraft.value
-        if (!API_KEY_PATTERN.matches(draft)) {
+        val urlDraft = apiUrlDraft.value
+        val keyDraft = apiKeyDraft.value
+        val baseUrl = ApiBaseUrl.normalize(urlDraft)
+        if (baseUrl == null) {
+            keyStatus.value = KeyStatus.Invalid(messageRes = R.string.settings_url_invalid_format)
+            return
+        }
+        if (!API_KEY_PATTERN.matches(keyDraft)) {
             keyStatus.value = KeyStatus.Invalid(messageRes = R.string.settings_key_invalid_format)
             return
         }
+        val credentials = ApiCredentials(baseUrl = baseUrl, apiKey = keyDraft)
         keyStatus.value = KeyStatus.Validating
         viewModelScope.launch {
-            val result = keyValidator.validate(draft)
-            // 校验期间输入若已变化，旧结果不再对应当前草稿：既不保存旧 Key，也不清空新输入。
-            if (apiKeyDraft.value != draft) {
+            val result = keyValidator.validate(credentials)
+            // 校验期间输入若已变化，旧结果不再对应当前草稿：既不保存旧凭据，也不清空新输入。
+            if (apiUrlDraft.value != urlDraft || apiKeyDraft.value != keyDraft) {
                 keyStatus.value = KeyStatus.Idle
                 return@launch
             }
             when (result) {
                 is KeyValidator.Result.Valid -> {
-                    settings.setApiKey(draft)
-                    apiKeyDraft.value = ""
+                    saveCredentials(credentials)
                     keyStatus.value = KeyStatus.Valid
                 }
 
@@ -176,12 +210,18 @@ class SettingsViewModel(
                 }
 
                 is KeyValidator.Result.Indeterminate -> {
-                    settings.setApiKey(draft)
-                    apiKeyDraft.value = ""
+                    saveCredentials(credentials)
                     keyStatus.value = KeyStatus.NetworkError(result.message)
                 }
             }
         }
+    }
+
+    /** 保存后地址框显示规范化后的值，Key 框清空，明文 Key 不再停留在界面上。 */
+    private suspend fun saveCredentials(credentials: ApiCredentials) {
+        settings.setApiCredentials(credentials)
+        apiUrlDraft.value = credentials.baseUrl
+        apiKeyDraft.value = ""
     }
 
     fun onDefaultQualityChange(quality: MusicQuality) {
@@ -213,7 +253,7 @@ class SettingsViewModel(
     }
 
     private data class PersistedSettings(
-        val apiKey: String?,
+        val credentials: ApiCredentials?,
         val defaultQuality: MusicQuality,
         val concurrency: Int,
         val themeMode: ThemeMode,

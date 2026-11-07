@@ -4,9 +4,9 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
-import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -30,7 +30,7 @@ class MainActivityFocusTest {
     fun focusKeyExtraOpensSettingsAndFocusesTheKeyInput() {
         launch(focusKey = true).use {
             composeRule.onNodeWithText("设置").assertIsDisplayed()
-            composeRule.onNode(hasSetTextAction()).assertIsFocused()
+            composeRule.onNodeWithTag("api_key_input").assertIsFocused()
         }
     }
 
@@ -50,7 +50,7 @@ class MainActivityFocusTest {
                 composeRule.onAllNodesWithText("设置").fetchSemanticsNodes().isNotEmpty()
             }
             composeRule.onNodeWithText("设置").assertIsDisplayed()
-            composeRule.onNode(hasSetTextAction()).assertIsFocused()
+            composeRule.onNodeWithTag("api_key_input").assertIsFocused()
         }
     }
 

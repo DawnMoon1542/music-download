@@ -4,8 +4,11 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.data.repository.DataStoreSettings
 import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.ThemeMode
@@ -32,6 +35,7 @@ class DataStoreSettingsTest {
 
     private lateinit var scope: CoroutineScope
     private lateinit var dataStoreFile: File
+    private lateinit var dataStore: DataStore<Preferences>
     private lateinit var settings: DataStoreSettings
 
     @Before
@@ -39,8 +43,7 @@ class DataStoreSettingsTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         dataStoreFile = File(context.cacheDir, "settings-${UUID.randomUUID()}.preferences_pb")
-        val dataStore: DataStore<Preferences> =
-            PreferenceDataStoreFactory.create(scope = scope) { dataStoreFile }
+        dataStore = PreferenceDataStoreFactory.create(scope = scope) { dataStoreFile }
         settings = DataStoreSettings(dataStore)
     }
 
@@ -56,8 +59,15 @@ class DataStoreSettingsTest {
         assertEquals(MusicQuality.Exhigh, settings.defaultQuality.first())
         assertEquals(3, settings.maxConcurrentDownloads.first())
         assertEquals(ThemeMode.System, settings.themeMode.first())
-        assertNull(settings.apiKey.first())
+        assertNull(settings.apiCredentials.first())
         assertFalse(settings.notificationAsked.first())
+    }
+
+    @Test
+    fun aKeyWithoutABaseUrlIsNotTreatedAsConfigured() = runBlocking {
+        dataStore.edit { it[stringPreferencesKey("api_key")] = "chksz_legacy_key" }
+
+        assertNull(settings.apiCredentials.first())
     }
 
     @Test
@@ -83,13 +93,16 @@ class DataStoreSettingsTest {
 
     @Test
     fun writtenSettingsAreExposedByTheirFlows() = runBlocking {
-        settings.setApiKey("chksz_test-key_123")
+        settings.setApiCredentials(ApiCredentials("https://api.test", "chksz_test-key_123"))
         settings.setDefaultQuality(MusicQuality.Lossless)
         settings.setMaxConcurrentDownloads(4)
         settings.setThemeMode(ThemeMode.Dark)
         settings.markNotificationAsked()
 
-        assertEquals("chksz_test-key_123", settings.apiKey.first())
+        assertEquals(
+            ApiCredentials("https://api.test", "chksz_test-key_123"),
+            settings.apiCredentials.first(),
+        )
         assertEquals(MusicQuality.Lossless, settings.defaultQuality.first())
         assertEquals(4, settings.maxConcurrentDownloads.first())
         assertEquals(ThemeMode.Dark, settings.themeMode.first())

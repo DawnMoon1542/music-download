@@ -1,5 +1,7 @@
 package com.dawnmoon.music_download.ui
 
+import kotlinx.coroutines.flow.map
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Context
@@ -32,6 +34,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+
+private const val TEST_API_BASE_URL = "https://api.test"
 
 /**
  * 系统分享入口的行为：从 `ACTION_SEND` 文本静默入队，并在处理完成后立即结束。
@@ -267,14 +271,15 @@ class ShareActivityTest {
         private val themeModeFlow = MutableStateFlow(ThemeMode.System)
         private val notificationAskedFlow = MutableStateFlow(true)
 
-        override val apiKey: Flow<String?> = apiKeyFlow
+        override val apiCredentials: Flow<ApiCredentials?> =
+            apiKeyFlow.map { key -> key?.let { ApiCredentials(TEST_API_BASE_URL, it) } }
         override val defaultQuality: Flow<MusicQuality> = defaultQualityFlow
         override val maxConcurrentDownloads: Flow<Int> = maxConcurrentDownloadsFlow
         override val themeMode: Flow<ThemeMode> = themeModeFlow
         override val notificationAsked: Flow<Boolean> = notificationAskedFlow
 
-        override suspend fun setApiKey(value: String) {
-            apiKeyFlow.value = value
+        override suspend fun setApiCredentials(value: ApiCredentials) {
+            apiKeyFlow.value = value.apiKey
         }
 
         override suspend fun setDefaultQuality(value: MusicQuality) {

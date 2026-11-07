@@ -1,5 +1,7 @@
 package com.dawnmoon.music_download.ui
 
+import com.dawnmoon.music_download.R
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import android.content.Context
 import android.content.ContextWrapper
 import app.cash.turbine.test
@@ -44,6 +46,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+
+private const val TEST_API_BASE_URL = "https://api.test"
 
 /**
  * [SettingsViewModel] 的 Key 校验、设置持久化与历史清空编排。
@@ -94,12 +98,14 @@ class SettingsViewModelTest {
         val viewModel = createViewModel()
         dispatcher.scheduler.advanceUntilIdle()
 
+        viewModel.onUrlChange(TEST_API_BASE_URL)
+
         viewModel.onKeyChange("not-a-chksz-key")
         viewModel.onSaveKey()
         dispatcher.scheduler.advanceUntilIdle()
 
         assertTrue(viewModel.state.value.keyStatus is KeyStatus.Invalid)
-        assertNull(settings.apiKeyFlow.value)
+        assertNull(settings.credentialsFlow.value)
         // 本地格式非法不消耗额度的校验请求。
         assertNull(viewModel.state.value.quota)
     }
@@ -112,11 +118,13 @@ class SettingsViewModelTest {
             val viewModel = createViewModel()
             dispatcher.scheduler.advanceUntilIdle()
 
+            viewModel.onUrlChange(TEST_API_BASE_URL)
+
             viewModel.onKeyChange("chksz_valid_key")
             viewModel.onSaveKey()
             dispatcher.scheduler.advanceUntilIdle()
 
-            assertEquals("chksz_valid_key", settings.apiKeyFlow.value)
+            assertEquals("chksz_valid_key", settings.credentialsFlow.value?.apiKey)
             assertEquals("", viewModel.state.value.apiKeyDraft)
             assertEquals(KeyStatus.Valid, viewModel.state.value.keyStatus)
             assertEquals(quota, viewModel.state.value.quota)
@@ -129,11 +137,13 @@ class SettingsViewModelTest {
             val viewModel = createViewModel()
             dispatcher.scheduler.advanceUntilIdle()
 
+            viewModel.onUrlChange(TEST_API_BASE_URL)
+
             viewModel.onKeyChange("chksz_revoked_key")
             viewModel.onSaveKey()
             dispatcher.scheduler.advanceUntilIdle()
 
-            assertNull(settings.apiKeyFlow.value)
+            assertNull(settings.credentialsFlow.value)
             assertEquals(
                 KeyStatus.Invalid("API Key 已失效"),
                 viewModel.state.value.keyStatus,
@@ -147,11 +157,13 @@ class SettingsViewModelTest {
             val viewModel = createViewModel()
             dispatcher.scheduler.advanceUntilIdle()
 
+            viewModel.onUrlChange(TEST_API_BASE_URL)
+
             viewModel.onKeyChange("chksz_maybe_valid")
             viewModel.onSaveKey()
             dispatcher.scheduler.advanceUntilIdle()
 
-            assertEquals("chksz_maybe_valid", settings.apiKeyFlow.value)
+            assertEquals("chksz_maybe_valid", settings.credentialsFlow.value?.apiKey)
             // 无法判定时保存 Key，并进入警告状态；具体提示文案由界面层展示。
             assertTrue(viewModel.state.value.keyStatus is KeyStatus.NetworkError)
         }
@@ -164,6 +176,8 @@ class SettingsViewModelTest {
             val viewModel = createViewModel()
             dispatcher.scheduler.advanceUntilIdle()
 
+            viewModel.onUrlChange(TEST_API_BASE_URL)
+
             viewModel.onKeyChange("chksz_old_key")
             viewModel.onSaveKey()
             dispatcher.scheduler.advanceUntilIdle()
@@ -175,7 +189,7 @@ class SettingsViewModelTest {
             dispatcher.scheduler.advanceUntilIdle()
 
             assertEquals("chksz_new_key", viewModel.state.value.apiKeyDraft)
-            assertNull(settings.apiKeyFlow.value)
+            assertNull(settings.credentialsFlow.value)
             assertEquals(KeyStatus.Idle, viewModel.state.value.keyStatus)
         }
 
@@ -183,7 +197,7 @@ class SettingsViewModelTest {
     fun `an already saved key is masked and never backfilled into the draft`() =
         runTest(dispatcher.scheduler) {
             val savedKey = "chksz_saved_secret_1234"
-            settings.apiKeyFlow.value = savedKey
+            settings.credentialsFlow.value = ApiCredentials(TEST_API_BASE_URL, savedKey)
             val viewModel = createViewModel()
             dispatcher.scheduler.advanceUntilIdle()
 
@@ -199,6 +213,52 @@ class SettingsViewModelTest {
             assertTrue("saved key mask must not be blank", masked.isNotBlank())
             assertEquals("", state.apiKeyDraft)
         }
+
+    @Test
+    fun `a malformed base url is rejected without validating`() = runTest(dispatcher.scheduler) {
+        val viewModel = createViewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.onUrlChange("api.test")
+        viewModel.onKeyChange("chksz_valid_key")
+        viewModel.onSaveKey()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            KeyStatus.Invalid(messageRes = R.string.settings_url_invalid_format),
+            viewModel.state.value.keyStatus,
+        )
+        assertNull(validator.lastCredentials)
+        assertNull(settings.credentialsFlow.value)
+    }
+
+    @Test
+    fun `the base url is normalized and saved together with the key`() =
+        runTest(dispatcher.scheduler) {
+            val viewModel = createViewModel()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.onUrlChange("  https://mirror.test/proxy/  ")
+            viewModel.onKeyChange("chksz_valid_key")
+            viewModel.onSaveKey()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            val expected = ApiCredentials("https://mirror.test/proxy", "chksz_valid_key")
+            assertEquals(expected, validator.lastCredentials)
+            assertEquals(expected, settings.credentialsFlow.value)
+            assertEquals("https://mirror.test/proxy", viewModel.state.value.apiUrlDraft)
+            assertEquals("https://mirror.test/proxy", viewModel.state.value.savedApiUrl)
+        }
+
+    @Test
+    fun `a saved base url is prefilled into the draft`() = runTest(dispatcher.scheduler) {
+        settings.credentialsFlow.value = ApiCredentials(TEST_API_BASE_URL, "chksz_saved")
+        val viewModel = createViewModel()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(TEST_API_BASE_URL, viewModel.state.value.apiUrlDraft)
+        assertEquals("", viewModel.state.value.apiKeyDraft)
+    }
 
     // endregion
 
@@ -326,20 +386,20 @@ class SettingsViewModelTest {
 
     private class FakeAppSettings : AppSettings {
 
-        val apiKeyFlow = MutableStateFlow<String?>(null)
+        val credentialsFlow = MutableStateFlow<ApiCredentials?>(null)
         val defaultQualityFlow = MutableStateFlow(MusicQuality.Exhigh)
         val maxConcurrentDownloadsFlow = MutableStateFlow(3)
         val themeModeFlow = MutableStateFlow(ThemeMode.System)
         val notificationAskedFlow = MutableStateFlow(false)
 
-        override val apiKey: Flow<String?> = apiKeyFlow
+        override val apiCredentials: Flow<ApiCredentials?> = credentialsFlow
         override val defaultQuality: Flow<MusicQuality> = defaultQualityFlow
         override val maxConcurrentDownloads: Flow<Int> = maxConcurrentDownloadsFlow
         override val themeMode: Flow<ThemeMode> = themeModeFlow
         override val notificationAsked: Flow<Boolean> = notificationAskedFlow
 
-        override suspend fun setApiKey(value: String) {
-            apiKeyFlow.value = value
+        override suspend fun setApiCredentials(value: ApiCredentials) {
+            credentialsFlow.value = value
         }
 
         override suspend fun setDefaultQuality(value: MusicQuality) {
@@ -373,7 +433,10 @@ class SettingsViewModelTest {
 
         var result: KeyValidator.Result = KeyValidator.Result.Valid(null)
 
-        override suspend fun validate(apiKey: String): KeyValidator.Result {
+        var lastCredentials: ApiCredentials? = null
+
+        override suspend fun validate(credentials: ApiCredentials): KeyValidator.Result {
+            lastCredentials = credentials
             if (gateEnabled) gate.await()
             (result as? KeyValidator.Result.Valid)?.quota?.let { quotaStore.record(it) }
             return result

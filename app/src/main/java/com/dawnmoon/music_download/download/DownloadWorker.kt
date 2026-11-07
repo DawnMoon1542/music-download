@@ -518,16 +518,16 @@ class DefaultDownloadWorker(
     ): RefreshResult {
         repo.markResolving(task.id)
 
-        val apiKey = settings.apiKey.first()
+        val credentials = settings.apiCredentials.first()
             ?: return RefreshResult.Failed(
-                fail(task.id, FailureKind.InvalidKey, "缺少 API Key，无法换链"),
+                fail(task.id, FailureKind.InvalidKey, "缺少 API 地址或 Key，无法换链"),
             )
         val songId = task.songId
             ?: return RefreshResult.Failed(
                 fail(task.id, FailureKind.NotFound, "任务缺少歌曲标识"),
             )
 
-        return when (val response = resolver.resolve(songId, task.requestedQuality, apiKey)) {
+        return when (val response = resolver.resolve(songId, task.requestedQuality, credentials)) {
             is ApiResponse.Failure -> RefreshResult.Failed(
                 fail(task.id, response.failure.toFailureKind(), response.failure.message),
             )

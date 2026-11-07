@@ -12,7 +12,6 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
-import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -20,6 +19,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.dawnmoon.music_download.domain.model.MusicQuality
@@ -27,7 +27,6 @@ import com.dawnmoon.music_download.domain.model.Quota
 import com.dawnmoon.music_download.domain.model.ThemeMode
 import com.dawnmoon.music_download.ui.theme.MusicDownloadTheme
 import com.dawnmoon.music_download.ui.viewmodel.TaskUiModel
-import com.dawnmoon.music_download.ui.viewmodel.WorkbenchTab
 import com.dawnmoon.music_download.ui.viewmodel.WorkbenchUiState
 import com.dawnmoon.music_download.ui.workbench.WorkbenchCallbacks
 import com.dawnmoon.music_download.ui.workbench.WorkbenchScreen
@@ -51,9 +50,10 @@ class WorkbenchScreenTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun emptyInProgressListShowsEmptyState() {
+    fun emptyTaskListShowsEmptyState() {
         setWorkbench(uiState())
 
+        composeRule.onNodeWithTag("task_search").assertDoesNotExist()
         composeRule.onNodeWithText("暂无下载任务", substring = true).assertIsDisplayed()
     }
 
@@ -76,7 +76,7 @@ class WorkbenchScreenTest {
         val enqueueButton = composeRule.onNodeWithText("解析并下载")
         enqueueButton.assertIsNotEnabled()
 
-        composeRule.onNode(hasSetTextAction()).performTextReplacement(
+        composeRule.onNodeWithTag("link_input").performTextReplacement(
             "https://music.163.com/song?id=1\nhttps://music.163.com/song?id=2",
         )
 
@@ -109,36 +109,35 @@ class WorkbenchScreenTest {
     }
 
     @Test
-    fun inProgressTabShowsCountAndCompletedTabShowsHistory() {
-        var state by mutableStateOf(
+    fun mergedListShowsUnfinishedAndCompletedTasksWithStatusCounts() {
+        setWorkbench(
             uiState(
                 inProgress = listOf(
-                    task(id = 1, title = "进行中的歌", statusLabel = "下载中", canPause = true),
-                    task(id = 2, title = "排队的歌", statusLabel = "排队中", canCancel = true),
+                    task(
+                        id = 1,
+                        title = "失败的歌",
+                        statusLabel = "网络错误",
+                        failureKind = "Network",
+                        canRetry = true,
+                    ),
+                    task(id = 2, title = "进行中的歌", statusLabel = "下载中", canPause = true),
                 ),
                 completed = listOf(
                     task(id = 3, title = "历史里的歌", statusLabel = "已完成", completedAt = 1L),
                 ),
             ),
         )
-        composeRule.setContent {
-            MusicDownloadTheme(themeMode = ThemeMode.Light) {
-                WorkbenchScreen(
-                    state = state,
-                    callbacks = WorkbenchCallbacks(
-                        onTabChange = { tab -> state = state.copy(selectedTab = tab) },
-                    ),
-                )
-            }
+
+        composeRule.onNodeWithText("异常 1").assertIsDisplayed()
+        composeRule.onNodeWithText("进行中 1").assertIsDisplayed()
+        composeRule.onNodeWithText("已完成 1").assertIsDisplayed()
+        composeRule.onNodeWithText("已取消", substring = true).assertDoesNotExist()
+
+        val list = composeRule.onNodeWithTag("task_list")
+        listOf("失败的歌", "进行中的歌", "历史里的歌").forEach { title ->
+            list.performScrollToNode(hasText(title))
+            composeRule.onNodeWithText(title).assertIsDisplayed()
         }
-
-        composeRule.onNodeWithText("进行中 (2)").assertIsDisplayed()
-        composeRule.onNodeWithText("已完成 (1)").assertIsDisplayed()
-
-        composeRule.onNodeWithText("已完成 (1)").performClick()
-
-        composeRule.onNodeWithText("历史里的歌").assertIsDisplayed()
-        composeRule.onNodeWithText("进行中的歌").assertDoesNotExist()
     }
 
     @Test
@@ -204,7 +203,7 @@ class WorkbenchScreenTest {
         composeRule.onNodeWithText("重试").assertIsDisplayed()
         composeRule.onNodeWithText("连接超时", substring = true).assertDoesNotExist()
 
-        composeRule.onNodeWithText("失败的歌").performClick()
+        composeRule.onNodeWithTag("task_failure_toggle").performClick()
 
         composeRule.onNodeWithText("连接超时", substring = true).assertIsDisplayed()
 
@@ -312,28 +311,18 @@ class WorkbenchScreenTest {
         quota: Quota? = null,
         inProgress: List<TaskUiModel> = emptyList(),
         completed: List<TaskUiModel> = emptyList(),
-        selectedTab: WorkbenchTab = WorkbenchTab.InProgress,
-        historyQuery: String = "",
-        isEnqueuing: Boolean = false,
-    ): WorkbenchUiState = WorkbenchUiState(
+    ): WorkbenchUiState = workbenchState(
+        tasks = inProgress + completed,
         input = input,
         selectedQuality = selectedQuality,
         quota = quota,
-        inProgress = inProgress,
-        completed = completed,
-        selectedTab = selectedTab,
-        historyQuery = historyQuery,
-        isEnqueuing = isEnqueuing,
-        engine = null,
     )
 
     private fun task(
         id: Long,
-        songId: Long = id + 1L,
         title: String,
-        artist: String? = null,
         statusLabel: String,
-        qualityLabel: String = MusicQuality.Exhigh.label,
+        artist: String? = null,
         progress: Float? = null,
         bytesDownloaded: Long? = null,
         totalBytes: Long? = null,
@@ -342,30 +331,22 @@ class WorkbenchScreenTest {
         failureMessage: String? = null,
         completedAt: Long? = null,
         canPause: Boolean = false,
-        canResume: Boolean = false,
         canCancel: Boolean = false,
         canRetry: Boolean = false,
         canDelete: Boolean = false,
-    ): TaskUiModel = TaskUiModel(
+    ): TaskUiModel = testTask(
         id = id,
-        songId = songId,
-        sourceUrl = "https://music.163.com/song?id=$id",
-        mediaStoreId = null,
         title = title,
-        artist = artist,
-        artworkUrl = null,
-        qualityLabel = qualityLabel,
         statusLabel = statusLabel,
+        artist = artist,
         progress = progress,
         bytesDownloaded = bytesDownloaded,
         totalBytes = totalBytes,
         speedBytesPerSecond = speedBytesPerSecond,
         failureKind = failureKind,
         failureMessage = failureMessage,
-        fileName = null,
         completedAt = completedAt,
         canPause = canPause,
-        canResume = canResume,
         canCancel = canCancel,
         canRetry = canRetry,
         canDelete = canDelete,

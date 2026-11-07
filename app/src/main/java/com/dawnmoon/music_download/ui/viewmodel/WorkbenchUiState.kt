@@ -4,28 +4,36 @@ import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.Quota
 import com.dawnmoon.music_download.download.EngineSnapshot
 
-/** 工作台的两个任务列表。 */
-enum class WorkbenchTab {
-    InProgress,
+/**
+ * 任务列表的状态分组；声明顺序即列表中的排序优先级。
+ *
+ * [Active] 涵盖排队、解析、等待、下载与暂停：它们都还需要继续推进或等待用户继续。
+ */
+enum class TaskStatusGroup {
+    Failed,
+    Active,
+    Cancelled,
     Completed,
 }
 
 /**
  * 工作台完整界面状态。
  *
- * [inProgress] 包含除已完成外的全部任务（含失败与取消），[completed] 已按 [historyQuery] 过滤。
+ * [tasks] 是全部任务按 [TaskStatusGroup] 优先级、再按创建时间从新到旧排序后，
+ * 经 [query] 过滤的结果；[statusCounts] 统计过滤前的数量，供列表标题展示。
  */
 data class WorkbenchUiState(
     val input: String,
     val selectedQuality: MusicQuality,
     val quota: Quota?,
-    val inProgress: List<TaskUiModel>,
-    val completed: List<TaskUiModel>,
-    val selectedTab: WorkbenchTab,
-    val historyQuery: String,
+    val tasks: List<TaskUiModel>,
+    val statusCounts: Map<TaskStatusGroup, Int>,
+    val query: String,
     val isEnqueuing: Boolean,
     val engine: EngineSnapshot?,
-)
+) {
+    val totalCount: Int get() = statusCounts.values.sum()
+}
 
 /**
  * 单个任务的展示模型。
@@ -43,20 +51,25 @@ data class TaskUiModel(
     val artworkUrl: String?,
     val qualityLabel: String,
     val statusLabel: String,
+    val statusGroup: TaskStatusGroup,
     val progress: Float?,
+    val isResolving: Boolean,
     val bytesDownloaded: Long?,
     val totalBytes: Long?,
     val speedBytesPerSecond: Long?,
     val failureKind: String?,
     val failureMessage: String?,
     val fileName: String?,
+    val createdAt: Long,
     val completedAt: Long?,
     val canPause: Boolean,
     val canResume: Boolean,
     val canCancel: Boolean,
     val canRetry: Boolean,
     val canDelete: Boolean,
-)
+) {
+    val isCompleted: Boolean get() = statusGroup == TaskStatusGroup.Completed
+}
 
 /** 由 ViewModel 推送给界面的一次性事件。 */
 sealed interface WorkbenchEvent {

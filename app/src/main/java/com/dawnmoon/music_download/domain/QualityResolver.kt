@@ -1,6 +1,7 @@
 package com.dawnmoon.music_download.domain
 
 import com.dawnmoon.music_download.data.remote.ApiResponse
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.ResolvedTrack
 import com.dawnmoon.music_download.domain.model.SongId
@@ -16,6 +17,6 @@ interface TrackResolver {
     suspend fun resolve(
         songId: SongId,
         requested: MusicQuality,
-        apiKey: String,
+        credentials: ApiCredentials,
     ): ApiResponse<ResolvedTrack>
 }

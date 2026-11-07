@@ -132,14 +132,14 @@ class ParseWorker(
         }
 
         try {
-            val apiKey = settings.apiKey.first()
-            if (apiKey.isNullOrBlank()) {
-                repo.markFailed(taskId, FailureKind.InvalidKey, "缺少 API Key")
+            val credentials = settings.apiCredentials.first()
+            if (credentials == null) {
+                repo.markFailed(taskId, FailureKind.InvalidKey, "缺少 API 地址或 Key")
                 return ParseOutcome.KeyLevelFailure
             }
 
             repo.markResolving(taskId)
-            return when (val response = resolver.resolve(songId, task.requestedQuality, apiKey)) {
+            return when (val response = resolver.resolve(songId, task.requestedQuality, credentials)) {
                 is ApiResponse.Success -> {
                     repo.completeResolve(taskId, response.value)
                     ParseOutcome.Resolved

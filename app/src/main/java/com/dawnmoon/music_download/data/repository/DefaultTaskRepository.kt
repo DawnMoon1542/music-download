@@ -98,7 +98,7 @@ class DefaultTaskRepository(
         ignoredUrlCount: Int,
     ): EnqueueOutcome {
         val resolutions = resolveLinks(links)
-        if (settings.apiKey.first().isNullOrBlank()) {
+        if (settings.apiCredentials.first() == null) {
             return EnqueueOutcome.MissingApiKey(extractedCount = links.size)
         }
 

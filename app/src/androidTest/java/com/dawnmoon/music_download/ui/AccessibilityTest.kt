@@ -22,8 +22,6 @@ import com.dawnmoon.music_download.ui.settings.SettingsScreen
 import com.dawnmoon.music_download.ui.theme.MusicDownloadTheme
 import com.dawnmoon.music_download.ui.viewmodel.KeyStatus
 import com.dawnmoon.music_download.ui.viewmodel.SettingsViewModel
-import com.dawnmoon.music_download.ui.viewmodel.TaskUiModel
-import com.dawnmoon.music_download.ui.viewmodel.WorkbenchTab
 import com.dawnmoon.music_download.ui.viewmodel.WorkbenchUiState
 import com.dawnmoon.music_download.ui.workbench.WorkbenchCallbacks
 import com.dawnmoon.music_download.ui.workbench.WorkbenchScreen
@@ -65,9 +63,9 @@ class AccessibilityTest {
     @Test
     fun workbenchKeyButtonsHaveDescriptionsAndTapTargets() {
         setWorkbench(
-            uiState(
-                inProgress = listOf(
-                    task(
+            workbenchState(
+                tasks = listOf(
+                    testTask(
                         id = 1L,
                         title = "下载中的歌",
                         statusLabel = "下载中",
@@ -88,16 +86,14 @@ class AccessibilityTest {
             .assertIsDisplayed()
             .assertTouchHeightIsEqualTo(48.dp)
         composeRule.onNodeWithTag("enqueue_button").assertTouchHeightIsEqualTo(48.dp)
-        composeRule.onNodeWithTag("tab_in_progress").assertTouchHeightIsEqualTo(48.dp)
     }
 
     @Test
     fun completedHistoryButtonsHaveDescriptionsAndTapTargets() {
         setWorkbench(
-            uiState(
-                selectedTab = WorkbenchTab.Completed,
-                completed = listOf(
-                    task(
+            workbenchState(
+                tasks = listOf(
+                    testTask(
                         id = 2L,
                         title = "历史里的歌",
                         statusLabel = "已完成",
@@ -107,9 +103,6 @@ class AccessibilityTest {
             ),
         )
 
-        composeRule.onNodeWithTag("history_actions_menu")
-            .assert(hasContentDescription("历史操作"))
-            .assertTouchHeightIsEqualTo(48.dp)
         composeRule.onNodeWithTag("task_action_play").assertTouchHeightIsEqualTo(48.dp)
         composeRule.onNodeWithTag("task_action_share").assertTouchHeightIsEqualTo(48.dp)
         composeRule.onNodeWithTag("task_more_actions")
@@ -123,7 +116,9 @@ class AccessibilityTest {
             MusicDownloadTheme(themeMode = ThemeMode.Light) {
                 SettingsScreen(
                     state = SettingsViewModel.State(
+                        apiUrlDraft = "https://api.test",
                         apiKeyDraft = "",
+                        savedApiUrl = null,
                         savedKeyMasked = null,
                         keyStatus = KeyStatus.Idle,
                         defaultQuality = MusicQuality.Exhigh,
@@ -158,9 +153,9 @@ class AccessibilityTest {
      */
     private fun setFailureCard() {
         setWorkbench(
-            uiState(
-                inProgress = listOf(
-                    task(
+            workbenchState(
+                tasks = listOf(
+                    testTask(
                         id = 1L,
                         title = FAILED_TITLE,
                         statusLabel = "网络错误，请检查网络后重试",
@@ -182,56 +177,6 @@ class AccessibilityTest {
         }
     }
 
-    private fun uiState(
-        inProgress: List<TaskUiModel> = emptyList(),
-        completed: List<TaskUiModel> = emptyList(),
-        selectedTab: WorkbenchTab = WorkbenchTab.InProgress,
-    ): WorkbenchUiState = WorkbenchUiState(
-        input = "",
-        selectedQuality = MusicQuality.Exhigh,
-        quota = null,
-        inProgress = inProgress,
-        completed = completed,
-        selectedTab = selectedTab,
-        historyQuery = "",
-        isEnqueuing = false,
-        engine = null,
-    )
-
-    private fun task(
-        id: Long,
-        title: String,
-        statusLabel: String,
-        failureKind: String? = null,
-        failureMessage: String? = null,
-        completedAt: Long? = null,
-        canPause: Boolean = false,
-        canCancel: Boolean = false,
-        canRetry: Boolean = false,
-    ): TaskUiModel = TaskUiModel(
-        id = id,
-        songId = id + 1L,
-        sourceUrl = "https://music.163.com/song?id=${id + 1L}",
-        mediaStoreId = null,
-        title = title,
-        artist = null,
-        artworkUrl = null,
-        qualityLabel = MusicQuality.Exhigh.label,
-        statusLabel = statusLabel,
-        progress = null,
-        bytesDownloaded = null,
-        totalBytes = null,
-        speedBytesPerSecond = null,
-        failureKind = failureKind,
-        failureMessage = failureMessage,
-        fileName = null,
-        completedAt = completedAt,
-        canPause = canPause,
-        canResume = false,
-        canCancel = canCancel,
-        canRetry = canRetry,
-        canDelete = false,
-    )
 
     private companion object {
         const val FAILURE_TOGGLE_TAG = "task_failure_toggle"

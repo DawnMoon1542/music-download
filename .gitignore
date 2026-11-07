@@ -13,6 +13,7 @@
 .externalNativeBuild
 .cxx
 api_key.txt
+api_url.txt
 local.properties
 .idea/
 *.iml

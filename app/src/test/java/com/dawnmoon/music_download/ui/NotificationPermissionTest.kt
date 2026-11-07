@@ -1,5 +1,7 @@
 package com.dawnmoon.music_download.ui
 
+import kotlinx.coroutines.flow.map
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.res.AssetManager
@@ -45,6 +47,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.w3c.dom.Element
+
+private const val TEST_API_BASE_URL = "https://api.test"
 
 /**
  * 下载前通知权限请求的行为：仅在 Android 13+ 且从未询问过时请求一次，
@@ -265,13 +269,14 @@ class NotificationPermissionTest {
         val themeModeFlow = MutableStateFlow(ThemeMode.System)
         val notificationAskedFlow = MutableStateFlow(false)
 
-        override val apiKey: Flow<String?> = apiKeyFlow
+        override val apiCredentials: Flow<ApiCredentials?> =
+            apiKeyFlow.map { key -> key?.let { ApiCredentials(TEST_API_BASE_URL, it) } }
         override val defaultQuality: Flow<MusicQuality> = defaultQualityFlow
         override val maxConcurrentDownloads: Flow<Int> = maxConcurrentDownloadsFlow
         override val themeMode: Flow<ThemeMode> = themeModeFlow
         override val notificationAsked: Flow<Boolean> = notificationAskedFlow
 
-        override suspend fun setApiKey(value: String) = error("unused")
+        override suspend fun setApiCredentials(value: ApiCredentials) = error("unused")
 
         override suspend fun setDefaultQuality(value: MusicQuality) {
             defaultQualityFlow.value = value

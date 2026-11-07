@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.domain.model.MusicQuality
 import com.dawnmoon.music_download.domain.model.ThemeMode
 import kotlinx.coroutines.flow.Flow
@@ -20,8 +21,11 @@ class DataStoreSettings(
     private val dataStore: DataStore<Preferences>,
 ) : AppSettings {
 
-    override val apiKey: Flow<String?> =
-        dataStore.data.map { it[Keys.ApiKey] }
+    override val apiCredentials: Flow<ApiCredentials?> = dataStore.data.map { preferences ->
+        val baseUrl = preferences[Keys.ApiBaseUrl]?.takeIf { it.isNotBlank() }
+        val apiKey = preferences[Keys.ApiKey]?.takeIf { it.isNotBlank() }
+        if (baseUrl != null && apiKey != null) ApiCredentials(baseUrl, apiKey) else null
+    }
 
     override val defaultQuality: Flow<MusicQuality> = dataStore.data.map { preferences ->
         preferences[Keys.DefaultQuality]
@@ -43,8 +47,11 @@ class DataStoreSettings(
     override val notificationAsked: Flow<Boolean> =
         dataStore.data.map { it[Keys.NotificationAsked] ?: false }
 
-    override suspend fun setApiKey(value: String) {
-        dataStore.edit { it[Keys.ApiKey] = value }
+    override suspend fun setApiCredentials(value: ApiCredentials) {
+        dataStore.edit {
+            it[Keys.ApiBaseUrl] = value.baseUrl
+            it[Keys.ApiKey] = value.apiKey
+        }
     }
 
     override suspend fun setDefaultQuality(value: MusicQuality) {
@@ -69,6 +76,7 @@ class DataStoreSettings(
     }
 
     private object Keys {
+        val ApiBaseUrl = stringPreferencesKey("api_base_url")
         val ApiKey = stringPreferencesKey("api_key")
         val DefaultQuality = stringPreferencesKey("default_quality")
         val MaxConcurrentDownloads = intPreferencesKey("max_concurrent_downloads")

@@ -3,17 +3,25 @@
 
     <!-- 工作台 -->
     <string name="workbench_title">音乐下载</string>
+    <string name="add_download_title">添加下载</string>
     <string name="link_input_placeholder">粘贴网易云链接或分享文案</string>
+    <string name="clear_input_content_description">清空输入</string>
     <string name="enqueue_action">解析并下载</string>
-    <string name="tab_in_progress">进行中</string>
-    <string name="tab_completed">已完成</string>
+    <string name="tasks_title">下载任务</string>
     <string name="empty_tasks">暂无下载任务，粘贴链接开始</string>
-    <string name="empty_history">暂无历史任务</string>
+    <string name="empty_tasks_hint">支持一次粘贴多条链接或整段分享文案</string>
+    <string name="task_search_placeholder">搜索曲名、艺术家、文件名或链接</string>
+    <string name="empty_task_search">没有匹配的任务</string>
+    <string name="status_group_failed">异常 %1$d</string>
+    <string name="status_group_active">进行中 %1$d</string>
+    <string name="status_group_cancelled">已取消 %1$d</string>
+    <string name="status_group_completed">已完成 %1$d</string>
     <string name="quality_label">音质</string>
     <string name="quota_summary">免费 %1$s · 付费 %2$s</string>
     <string name="quota_unknown">—</string>
     <string name="quota_low_warning">额度不足</string>
     <string name="task_failure_detail">失败详情：%1$s</string>
+    <string name="task_failure_details_label">失败详情</string>
     <string name="task_failure_expand_action">展开失败详情</string>
     <string name="task_failure_collapse_action">收起失败详情</string>
     <string name="task_cover_content_description">封面</string>
@@ -37,12 +45,9 @@
     <string name="action_confirm">确认</string>
 
     <!-- 历史记录 -->
-    <string name="history_search_placeholder">搜索曲名、艺术家或文件名</string>
-    <string name="history_action_content_description">历史操作</string>
-    <string name="action_clear_history">清空历史</string>
+    <string name="action_clear_history">清空已完成记录</string>
     <string name="clear_history_records_only">仅清空记录</string>
     <string name="clear_history_with_files">同时删除文件</string>
-    <string name="empty_history_search">没有匹配的历史记录</string>
     <string name="action_play">播放</string>
     <string name="action_share">分享</string>
     <string name="action_redownload">按音质重新下载</string>
@@ -91,13 +96,16 @@
     <string name="settings_title">设置</string>
     <string name="settings_content_description">设置</string>
     <string name="back_content_description">返回</string>
-    <string name="settings_placeholder">设置项将在后续版本提供</string>
 
-    <!-- 设置：API Key -->
-    <string name="settings_section_api_key">API Key</string>
+    <!-- 设置：API 地址与 Key -->
+    <string name="settings_section_api_key">API 配置</string>
+    <string name="settings_api_description">API 地址与 Key 需一起填写，保存时会联网验证一次（消耗 1 次额度）。</string>
+    <string name="settings_api_url_label">API 地址</string>
+    <string name="settings_api_url_placeholder">https://api.example.com</string>
     <string name="settings_api_key_label">API Key</string>
-    <string name="settings_get_key_link">获取 Key ↗ (https://api.chksz.com/login)</string>
-    <string name="settings_key_saved">已保存：%1$s</string>
+    <string name="settings_get_key_link">前往 API 网站 ↗</string>
+    <string name="settings_key_saved">已保存：%1$s · %2$s</string>
+    <string name="settings_url_invalid_format">API 地址格式不正确，需以 http:// 或 https:// 开头</string>
     <string name="settings_key_saving">验证中</string>
     <string name="settings_key_save_and_validate">保存并验证</string>
     <string name="settings_key_show">显示 Key</string>
@@ -120,6 +128,7 @@
     <!-- 设置：历史与关于 -->
     <string name="settings_section_history">历史</string>
     <string name="settings_section_about">关于</string>
-    <string name="settings_about_version">版本 %1$s</string>
-    <string name="settings_about_api">接口 %1$s</string>
+    <string name="settings_about_version_label">版本</string>
+    <string name="settings_about_api_label">接口地址</string>
+    <string name="settings_api_not_configured">未配置</string>
 </resources>

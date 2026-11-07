@@ -1,5 +1,7 @@
 package com.dawnmoon.music_download.ui
 
+import kotlinx.coroutines.flow.map
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.compose.runtime.collectAsState
@@ -11,7 +13,6 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -52,10 +53,12 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
+private const val TEST_API_BASE_URL = "https://api.test"
+
 /**
  * 设置页的交互行为。
  *
- * 页面由真实的 [SettingsViewModel] 驱动，注入的 [KeyValidator] 是 Fake，因此保存 Key
+ * 页面由真实的 [SettingsViewModel] 驱动，注入的 [KeyValidator] 是 Fake，因此保存凭据
  * 不会访问网络，但“验证中”状态与保存按钮禁用可以真实观察到。节点定位使用测试标签，
  * 不断言具体文案，避免把界面拷贝当成行为契约。
  */
@@ -76,22 +79,42 @@ class SettingsScreenTest {
         val viewModel = createViewModel()
         setScreen(viewModel)
 
-        composeRule.onNode(hasSetTextAction()).performTextReplacement("chksz_draft_key")
-        composeRule.onNode(hasSetTextAction())
+        composeRule.onNodeWithTag("api_key_input").performTextReplacement("chksz_draft_key")
+        composeRule.onNodeWithTag("api_key_input")
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
 
         composeRule.onNodeWithTag("toggle_key_visibility").performClick()
 
-        composeRule.onNode(hasSetTextAction())
+        composeRule.onNodeWithTag("api_key_input")
             .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Password))
     }
 
     @Test
-    fun theApiKeyGroupShowsTheGetKeyLink() {
+    fun theSiteLinkAppearsOnlyAfterAValidBaseUrlIsEntered() {
         val viewModel = createViewModel()
         setScreen(viewModel)
 
+        composeRule.onNodeWithTag("get_key_link").assertDoesNotExist()
+
+        composeRule.onNodeWithTag("api_url_input").performTextReplacement("https://api.test")
+
         composeRule.onNodeWithTag("get_key_link").assertIsDisplayed()
+    }
+
+    @Test
+    fun savingSubmitsTheBaseUrlTogetherWithTheKey() {
+        val viewModel = createViewModel()
+        setScreen(viewModel)
+
+        composeRule.onNodeWithTag("api_url_input").performTextReplacement("https://api.test/")
+        composeRule.onNodeWithTag("api_key_input").performTextReplacement("chksz_saved_key")
+        composeRule.onNodeWithTag("save_key").performClick()
+
+        composeRule.waitUntil(5_000) { viewModel.state.value.keyStatus == KeyStatus.Valid }
+        composeRule.runOnIdle {
+            assertEquals(ApiCredentials("https://api.test", "chksz_saved_key"), validator.lastCredentials)
+            assertEquals("chksz_saved_key", settings.apiKeyFlow.value)
+        }
     }
 
     @Test
@@ -100,7 +123,8 @@ class SettingsScreenTest {
         val viewModel = createViewModel()
         setScreen(viewModel)
 
-        composeRule.onNode(hasSetTextAction()).performTextReplacement("chksz_pending_key")
+        composeRule.onNodeWithTag("api_url_input").performTextReplacement("https://api.test")
+        composeRule.onNodeWithTag("api_key_input").performTextReplacement("chksz_pending_key")
         composeRule.onNodeWithTag("save_key").performClick()
 
         composeRule.waitUntil(5_000) {
@@ -181,6 +205,7 @@ class SettingsScreenTest {
                 SettingsScreen(
                     state = state,
                     callbacks = SettingsCallbacks(
+                        onUrlChange = viewModel::onUrlChange,
                         onKeyChange = viewModel::onKeyChange,
                         onSaveKey = viewModel::onSaveKey,
                         onDefaultQualityChange = viewModel::onDefaultQualityChange,
@@ -203,14 +228,15 @@ class SettingsScreenTest {
         val themeModeFlow = MutableStateFlow(ThemeMode.System)
         val notificationAskedFlow = MutableStateFlow(false)
 
-        override val apiKey: Flow<String?> = apiKeyFlow
+        override val apiCredentials: Flow<ApiCredentials?> =
+            apiKeyFlow.map { key -> key?.let { ApiCredentials(TEST_API_BASE_URL, it) } }
         override val defaultQuality: Flow<MusicQuality> = defaultQualityFlow
         override val maxConcurrentDownloads: Flow<Int> = maxConcurrentDownloadsFlow
         override val themeMode: Flow<ThemeMode> = themeModeFlow
         override val notificationAsked: Flow<Boolean> = notificationAskedFlow
 
-        override suspend fun setApiKey(value: String) {
-            apiKeyFlow.value = value
+        override suspend fun setApiCredentials(value: ApiCredentials) {
+            apiKeyFlow.value = value.apiKey
         }
 
         override suspend fun setDefaultQuality(value: MusicQuality) {
@@ -236,7 +262,10 @@ class SettingsScreenTest {
 
         var gateEnabled: Boolean = false
 
-        override suspend fun validate(apiKey: String): KeyValidator.Result {
+        var lastCredentials: ApiCredentials? = null
+
+        override suspend fun validate(credentials: ApiCredentials): KeyValidator.Result {
+            lastCredentials = credentials
             if (gateEnabled) gate.await()
             return KeyValidator.Result.Valid(quota = null)
         }

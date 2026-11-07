@@ -1,5 +1,6 @@
 package com.dawnmoon.music_download.data
 
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.core.AppClock
 import com.dawnmoon.music_download.data.local.DownloadTaskDao
 import com.dawnmoon.music_download.data.local.DownloadTaskEntity
@@ -36,6 +37,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+
+private const val TEST_API_BASE_URL = "https://api.test"
 
 private const val TEST_API_KEY = "chksz_test_key"
 private const val RESOLVED_SONG_ID = 1867150097L
@@ -1220,7 +1223,8 @@ class DefaultTaskRepositoryTest {
         private val themeFlow = MutableStateFlow(ThemeMode.System)
         private val notificationAskedFlow = MutableStateFlow(false)
 
-        override val apiKey: Flow<String?> = keyFlow
+        override val apiCredentials: Flow<ApiCredentials?> =
+            keyFlow.map { key -> key?.let { ApiCredentials(TEST_API_BASE_URL, it) } }
         override val defaultQuality: Flow<MusicQuality> = qualityFlow
         override val maxConcurrentDownloads: Flow<Int> = concurrencyFlow
         override val themeMode: Flow<ThemeMode> = themeFlow
@@ -1230,8 +1234,8 @@ class DefaultTaskRepositoryTest {
             keyFlow.value = value
         }
 
-        override suspend fun setApiKey(value: String) {
-            keyFlow.value = value
+        override suspend fun setApiCredentials(value: ApiCredentials) {
+            keyFlow.value = value.apiKey
         }
 
         override suspend fun setDefaultQuality(value: MusicQuality) {

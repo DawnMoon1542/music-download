@@ -1,5 +1,7 @@
 package com.dawnmoon.music_download.download
 
+import kotlinx.coroutines.flow.map
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.core.AppClock
 import com.dawnmoon.music_download.data.remote.ApiFailure
 import com.dawnmoon.music_download.data.remote.ApiResponse
@@ -41,6 +43,8 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+
+private const val TEST_API_BASE_URL = "https://api.test"
 
 private const val TASK_ID = 42L
 private const val SONG_ID = 1_867_150_097L
@@ -1398,9 +1402,9 @@ private class QueueTrackResolver(
     override suspend fun resolve(
         songId: SongId,
         requested: MusicQuality,
-        apiKey: String,
+        credentials: ApiCredentials,
     ): ApiResponse<ResolvedTrack> {
-        calls += ResolveCall(songId = songId, requested = requested, apiKey = apiKey)
+        calls += ResolveCall(songId = songId, requested = requested, apiKey = credentials.apiKey)
         return pending.removeFirstOrNull()
             ?: error("the worker requested an unexpected extra track resolution")
     }
@@ -1409,14 +1413,15 @@ private class QueueTrackResolver(
 private class ResumeFakeSettings : AppSettings {
     private val keyFlow = MutableStateFlow<String?>("test-key")
 
-    override val apiKey: Flow<String?> = keyFlow
+    override val apiCredentials: Flow<ApiCredentials?> =
+        keyFlow.map { key -> key?.let { ApiCredentials(TEST_API_BASE_URL, it) } }
     override val defaultQuality: Flow<MusicQuality> = MutableStateFlow(MusicQuality.Exhigh)
     override val maxConcurrentDownloads: Flow<Int> = MutableStateFlow(3)
     override val themeMode: Flow<ThemeMode> = MutableStateFlow(ThemeMode.System)
     override val notificationAsked: Flow<Boolean> = MutableStateFlow(false)
 
-    override suspend fun setApiKey(value: String) {
-        keyFlow.value = value
+    override suspend fun setApiCredentials(value: ApiCredentials) {
+        keyFlow.value = value.apiKey
     }
 
     override suspend fun setDefaultQuality(value: MusicQuality) = Unit

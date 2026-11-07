@@ -1,5 +1,7 @@
 package com.dawnmoon.music_download.ui
 
+import kotlinx.coroutines.flow.map
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.res.AssetManager
@@ -31,7 +33,7 @@ import com.dawnmoon.music_download.download.DownloadController
 import com.dawnmoon.music_download.download.EngineSnapshot
 import com.dawnmoon.music_download.download.TaskFileStore
 import com.dawnmoon.music_download.ui.viewmodel.WorkbenchEvent
-import com.dawnmoon.music_download.ui.viewmodel.WorkbenchTab
+import com.dawnmoon.music_download.ui.viewmodel.TaskStatusGroup
 import com.dawnmoon.music_download.ui.viewmodel.WorkbenchViewModel
 import java.io.File
 import java.io.OutputStream
@@ -54,6 +56,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.w3c.dom.Element
+
+private const val TEST_API_BASE_URL = "https://api.test"
 
 /**
  * [WorkbenchViewModel] 的工作台状态与入队结果测试。
@@ -93,7 +97,7 @@ class WorkbenchViewModelTest {
     // region 初始状态
 
     @Test
-    fun `starts with the default quality from settings and the in progress tab`() =
+    fun `starts with the default quality from settings and an empty query`() =
         runTest(dispatcher.scheduler) {
             settings.defaultQualityFlow.value = MusicQuality.Lossless
 
@@ -101,23 +105,56 @@ class WorkbenchViewModelTest {
             dispatcher.scheduler.runCurrent()
 
             assertEquals(MusicQuality.Lossless, viewModel.state.value.selectedQuality)
-            assertEquals(WorkbenchTab.InProgress, viewModel.state.value.selectedTab)
+            assertEquals("", viewModel.state.value.query)
         }
 
     // endregion
 
-    // region 进行中列表
+    // region 合并列表
 
     @Test
-    fun `cancelled tasks remain in the in progress list`() =
+    fun `unfinished and completed tasks are merged into one list`() =
+        runTest(dispatcher.scheduler) {
+            repo.inProgress.value = listOf(task(id = 1L, status = TaskStatus.Cancelled))
+            repo.completed.value = listOf(task(id = 2L, status = TaskStatus.Completed))
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            assertEquals(setOf(1L, 2L), viewModel.state.value.tasks.map { it.id }.toSet())
+            assertEquals(2, viewModel.state.value.totalCount)
+        }
+
+    @Test
+    fun `tasks are ordered by status group then newest created first`() =
         runTest(dispatcher.scheduler) {
             repo.inProgress.value = listOf(
-                task(id = 1L, status = TaskStatus.Cancelled),
+                task(id = 1L, status = TaskStatus.Cancelled, createdAt = 500),
+                task(id = 2L, status = TaskStatus.Downloading, createdAt = 100),
+                task(id = 3L, status = TaskStatus.Failed, createdAt = 200),
+                task(id = 4L, status = TaskStatus.Paused, createdAt = 300),
+                task(id = 5L, status = TaskStatus.Failed, createdAt = 400),
+                task(id = 6L, status = TaskStatus.Queued, createdAt = 50),
+                task(id = 7L, status = TaskStatus.Cancelled, createdAt = 600),
+            )
+            repo.completed.value = listOf(
+                task(id = 8L, status = TaskStatus.Completed, createdAt = 900),
+                task(id = 9L, status = TaskStatus.Completed, createdAt = 1_000),
             )
             val viewModel = createViewModel()
             dispatcher.scheduler.runCurrent()
 
-            assertEquals(listOf(1L), viewModel.state.value.inProgress.map { it.id })
+            val state = viewModel.state.value
+            // 异常 → 进行中（含暂停、排队）→ 已取消 → 已完成；同组内创建时间新的在前。
+            assertEquals(listOf(5L, 3L, 4L, 2L, 6L, 7L, 1L, 9L, 8L), state.tasks.map { it.id })
+            assertEquals(
+                mapOf(
+                    TaskStatusGroup.Failed to 2,
+                    TaskStatusGroup.Active to 3,
+                    TaskStatusGroup.Cancelled to 2,
+                    TaskStatusGroup.Completed to 2,
+                ),
+                state.statusCounts,
+            )
         }
 
     @Test
@@ -130,9 +167,10 @@ class WorkbenchViewModelTest {
             val viewModel = createViewModel()
             dispatcher.scheduler.runCurrent()
 
-            val models = viewModel.state.value.inProgress
-            assertEquals(statuses, models.map { statuses[it.id.toInt() - 1] })
-            statuses.zip(models).forEach { (status, model) ->
+            val models = viewModel.state.value.tasks
+            assertEquals(statuses.size, models.size)
+            models.forEach { model ->
+                val status = statuses[model.id.toInt() - 1]
                 assertEquals(
                     "canDelete for $status",
                     status == TaskStatus.Cancelled,
@@ -191,11 +229,6 @@ class WorkbenchViewModelTest {
             viewModel.onInputChange("https://music.163.com/song?id=1")
             dispatcher.scheduler.runCurrent()
 
-            // 先切走，才能验证入队成功后实现确实把用户带回"进行中"，而不是碰巧停在初始 Tab。
-            viewModel.onTabChange(WorkbenchTab.Completed)
-            dispatcher.scheduler.runCurrent()
-            assertEquals(WorkbenchTab.Completed, viewModel.state.value.selectedTab)
-
             viewModel.events.test {
                 viewModel.onEnqueue()
                 dispatcher.scheduler.runCurrent()
@@ -209,7 +242,6 @@ class WorkbenchViewModelTest {
             assertEquals(1, engine.startCount)
             assertEquals(listOf(1L), engine.requestedIds)
             assertEquals("", viewModel.state.value.input)
-            assertEquals(WorkbenchTab.InProgress, viewModel.state.value.selectedTab)
         }
 
     @Test
@@ -364,45 +396,63 @@ class WorkbenchViewModelTest {
 
     // endregion
 
-    // region 历史搜索
+    // region 搜索
 
     @Test
-    fun `history filter matches title case insensitively`() =
+    fun `search matches title case insensitively`() =
         runTest(dispatcher.scheduler) {
             repo.completed.value = historyTasks()
             val viewModel = createViewModel()
             dispatcher.scheduler.runCurrent()
 
-            viewModel.onHistoryQueryChange("night")
+            viewModel.onQueryChange("night")
             dispatcher.scheduler.runCurrent()
 
-            assertEquals(listOf(1L), viewModel.state.value.completed.map { it.id })
+            assertEquals(listOf(1L), viewModel.state.value.tasks.map { it.id })
         }
 
     @Test
-    fun `history filter matches artist case insensitively`() =
+    fun `search matches artist case insensitively`() =
         runTest(dispatcher.scheduler) {
             repo.completed.value = historyTasks()
             val viewModel = createViewModel()
             dispatcher.scheduler.runCurrent()
 
-            viewModel.onHistoryQueryChange("AURORA")
+            viewModel.onQueryChange("AURORA")
             dispatcher.scheduler.runCurrent()
 
-            assertEquals(listOf(2L), viewModel.state.value.completed.map { it.id })
+            assertEquals(listOf(2L), viewModel.state.value.tasks.map { it.id })
         }
 
     @Test
-    fun `history filter matches file name case insensitively`() =
+    fun `search matches file name case insensitively`() =
         runTest(dispatcher.scheduler) {
             repo.completed.value = historyTasks()
             val viewModel = createViewModel()
             dispatcher.scheduler.runCurrent()
 
-            viewModel.onHistoryQueryChange("TRACK_01")
+            viewModel.onQueryChange("TRACK_01")
             dispatcher.scheduler.runCurrent()
 
-            assertEquals(listOf(3L), viewModel.state.value.completed.map { it.id })
+            assertEquals(listOf(3L), viewModel.state.value.tasks.map { it.id })
+        }
+
+    @Test
+    fun `search also covers unfinished tasks by source url`() =
+        runTest(dispatcher.scheduler) {
+            repo.inProgress.value = listOf(
+                task(id = 10L, status = TaskStatus.Queued, sourceUrl = "https://163cn.tv/abcXYZ"),
+                task(id = 11L, status = TaskStatus.Queued),
+            )
+            repo.completed.value = historyTasks()
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            viewModel.onQueryChange("abcxyz")
+            dispatcher.scheduler.runCurrent()
+
+            assertEquals(listOf(10L), viewModel.state.value.tasks.map { it.id })
+            assertEquals(5, viewModel.state.value.totalCount)
         }
 
     // endregion
@@ -654,7 +704,7 @@ class WorkbenchViewModelTest {
             val viewModel = createViewModel()
             dispatcher.scheduler.runCurrent()
 
-            val models = viewModel.state.value.inProgress
+            val models = viewModel.state.value.tasks
             assertEquals(FailureKind.entries.size, models.size)
 
             val kindsById = FailureKind.entries
@@ -702,7 +752,7 @@ class WorkbenchViewModelTest {
 
             assertEquals(
                 TWO_MIB,
-                requireNotNull(viewModel.state.value.inProgress.single().speedBytesPerSecond),
+                requireNotNull(viewModel.state.value.tasks.single().speedBytesPerSecond),
             )
         }
 
@@ -727,7 +777,7 @@ class WorkbenchViewModelTest {
             dispatcher.scheduler.advanceTimeBy(1_000)
             dispatcher.scheduler.runCurrent()
 
-            assertNull(viewModel.state.value.inProgress.single().speedBytesPerSecond)
+            assertNull(viewModel.state.value.tasks.single().speedBytesPerSecond)
         }
 
     @Test
@@ -752,7 +802,7 @@ class WorkbenchViewModelTest {
             dispatcher.scheduler.runCurrent()
             assertEquals(
                 TWO_MIB,
-                requireNotNull(viewModel.state.value.inProgress.single().speedBytesPerSecond),
+                requireNotNull(viewModel.state.value.tasks.single().speedBytesPerSecond),
             )
 
             // 重连后进度回退：差值不再是有效速度，不能显示负值或沿用旧值。
@@ -763,7 +813,7 @@ class WorkbenchViewModelTest {
             dispatcher.scheduler.advanceTimeBy(1_000)
             dispatcher.scheduler.runCurrent()
 
-            assertNull(viewModel.state.value.inProgress.single().speedBytesPerSecond)
+            assertNull(viewModel.state.value.tasks.single().speedBytesPerSecond)
         }
 
     @Test
@@ -780,7 +830,7 @@ class WorkbenchViewModelTest {
             val viewModel = createViewModel()
             dispatcher.scheduler.runCurrent()
 
-            assertNull(viewModel.state.value.completed.single().speedBytesPerSecond)
+            assertNull(viewModel.state.value.tasks.single().speedBytesPerSecond)
         }
 
     // endregion
@@ -869,6 +919,7 @@ class WorkbenchViewModelTest {
         failureKind: FailureKind? = null,
         failureMessage: String? = null,
         completedAt: Long? = null,
+        createdAt: Long = id,
     ): DownloadTask =
         DownloadTask(
             id = id,
@@ -891,7 +942,7 @@ class WorkbenchViewModelTest {
             fileName = fileName,
             failureKind = failureKind,
             failureMessage = failureMessage,
-            createdAt = id,
+            createdAt = createdAt,
             updatedAt = id,
             completedAt = completedAt,
         )
@@ -1143,13 +1194,14 @@ class WorkbenchViewModelTest {
         val themeModeFlow = MutableStateFlow(ThemeMode.System)
         val notificationAskedFlow = MutableStateFlow(false)
 
-        override val apiKey: Flow<String?> = apiKeyFlow
+        override val apiCredentials: Flow<ApiCredentials?> =
+            apiKeyFlow.map { key -> key?.let { ApiCredentials(TEST_API_BASE_URL, it) } }
         override val defaultQuality: Flow<MusicQuality> = defaultQualityFlow
         override val maxConcurrentDownloads: Flow<Int> = maxConcurrentDownloadsFlow
         override val themeMode: Flow<ThemeMode> = themeModeFlow
         override val notificationAsked: Flow<Boolean> = notificationAskedFlow
 
-        override suspend fun setApiKey(value: String) = error("unused")
+        override suspend fun setApiCredentials(value: ApiCredentials) = error("unused")
 
         override suspend fun setDefaultQuality(value: MusicQuality) {
             defaultQualityFlow.value = value

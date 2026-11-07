@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.dawnmoon.music_download.domain.model.ApiCredentials
 import com.dawnmoon.music_download.MusicDownloadApp
 import com.dawnmoon.music_download.data.repository.EnqueueOutcome
 import com.dawnmoon.music_download.domain.model.AudioFormat
@@ -88,7 +89,7 @@ class InterruptedTaskRecoveryTest {
      */
     private suspend fun seedDownloadingTask(app: MusicDownloadApp): Long {
         val dependencies = app.dependencies
-        dependencies.settings.setApiKey(TEST_API_KEY)
+        dependencies.settings.setApiCredentials(ApiCredentials("https://api.test", TEST_API_KEY))
 
         val songId = SongId(System.nanoTime())
         val link = SongLink.Direct(
