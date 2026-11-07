@@ -41,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.dawnmoon.music_download.R
@@ -107,7 +108,10 @@ fun WorkbenchScreen(
                     } else {
                         BatchActionsMenu(callbacks = callbacks)
                     }
-                    IconButton(onClick = callbacks.onOpenSettings) {
+                    IconButton(
+                        onClick = callbacks.onOpenSettings,
+                        modifier = Modifier.testTag("settings_button"),
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Settings,
                             contentDescription = stringResource(R.string.settings_content_description),
@@ -143,7 +147,10 @@ private fun BatchActionsMenu(callbacks: WorkbenchCallbacks) {
     var showCancelAllConfirmation by remember { mutableStateOf(false) }
 
     Box {
-        IconButton(onClick = { expanded = true }) {
+        IconButton(
+            onClick = { expanded = true },
+            modifier = Modifier.testTag("batch_actions_menu"),
+        ) {
             Icon(
                 imageVector = Icons.Default.MoreVert,
                 contentDescription = stringResource(R.string.more_actions_content_description),
@@ -215,7 +222,10 @@ private fun HistoryMenu(callbacks: WorkbenchCallbacks) {
     var showClearDialog by remember { mutableStateOf(false) }
 
     Box {
-        IconButton(onClick = { expanded = true }) {
+        IconButton(
+            onClick = { expanded = true },
+            modifier = Modifier.testTag("history_actions_menu"),
+        ) {
             Icon(
                 imageVector = Icons.Default.MoreVert,
                 contentDescription = stringResource(R.string.history_action_content_description),
@@ -263,7 +273,9 @@ private fun LinkInputCard(
                 placeholder = { Text(stringResource(R.string.link_input_placeholder)) },
                 minLines = 3,
                 maxLines = 6,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("link_input"),
             )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -273,11 +285,14 @@ private fun LinkInputCard(
                     selected = state.selectedQuality,
                     onQualityChange = callbacks.onQualityChange,
                     enabled = !state.isEnqueuing,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("quality_selector"),
                 )
                 Button(
                     onClick = callbacks.onEnqueue,
                     enabled = state.input.isNotBlank() && !state.isEnqueuing,
+                    modifier = Modifier.testTag("enqueue_button"),
                 ) {
                     if (state.isEnqueuing) {
                         CircularProgressIndicator(
@@ -306,6 +321,7 @@ private fun TaskTabs(
         Tab(
             selected = selectedIndex == 0,
             onClick = { callbacks.onTabChange(WorkbenchTab.InProgress) },
+            modifier = Modifier.testTag("tab_in_progress"),
             text = {
                 Text("${stringResource(R.string.tab_in_progress)} (${state.inProgress.size})")
             },
@@ -313,6 +329,7 @@ private fun TaskTabs(
         Tab(
             selected = selectedIndex == 1,
             onClick = { callbacks.onTabChange(WorkbenchTab.Completed) },
+            modifier = Modifier.testTag("tab_completed"),
             text = {
                 Text("${stringResource(R.string.tab_completed)} (${state.completed.size})")
             },

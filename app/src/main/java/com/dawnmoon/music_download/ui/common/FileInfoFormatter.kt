@@ -34,13 +34,20 @@ object FileInfoFormatter {
     /**
      * 格式化任务时间。
      *
+     * 日期与年份的排版由调用方从资源传入，避免界面层出现硬编码中文；[sameYearFormat]
+     * 接收月、日、时间三个参数，[otherYearFormat] 接收年、月、日、时间四个参数。
+     *
      * @param millis 要展示的时间；null 表示未知。
      * @param nowMillis 当前时间，用于判断是否需要展示年份。
+     * @param sameYearFormat 同一年时使用的格式，例如 `%1$d月%2$d日 %3$s`。
+     * @param otherYearFormat 不同年份时使用的格式，例如 `%1$d年%2$d月%3$d日 %4$s`。
      * @param zone 展示时区，默认取系统时区。
      */
     fun formatDate(
         millis: Long?,
         nowMillis: Long,
+        sameYearFormat: String,
+        otherYearFormat: String,
         zone: ZoneId = ZoneId.systemDefault(),
     ): String {
         if (millis == null) return UNKNOWN
@@ -48,9 +55,22 @@ object FileInfoFormatter {
         val now = Instant.ofEpochMilli(nowMillis).atZone(zone)
         val time = String.format(Locale.US, "%02d:%02d", date.hour, date.minute)
         return if (date.year == now.year) {
-            "${date.monthValue}月${date.dayOfMonth}日 $time"
+            String.format(
+                Locale.US,
+                sameYearFormat,
+                date.monthValue,
+                date.dayOfMonth,
+                time,
+            )
         } else {
-            "${date.year}年${date.monthValue}月${date.dayOfMonth}日 $time"
+            String.format(
+                Locale.US,
+                otherYearFormat,
+                date.year,
+                date.monthValue,
+                date.dayOfMonth,
+                time,
+            )
         }
     }
 

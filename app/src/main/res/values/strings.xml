@@ -14,7 +14,13 @@
     <string name="quota_unknown">—</string>
     <string name="quota_low_warning">额度不足</string>
     <string name="task_failure_detail">失败详情：%1$s</string>
+    <string name="task_failure_expand_action">展开失败详情</string>
+    <string name="task_failure_collapse_action">收起失败详情</string>
     <string name="task_cover_content_description">封面</string>
+
+    <!-- 日期格式：参数依次为月、日（或年、月、日）与时间 -->
+    <string name="date_format_current_year">%1$d月%2$d日 %3$s</string>
+    <string name="date_format_other_year">%1$d年%2$d月%3$d日 %4$s</string>
 
     <!-- 任务操作 -->
     <string name="action_pause">暂停</string>
@@ -100,6 +106,7 @@
     <string name="settings_key_status_validating">验证中</string>
     <string name="settings_key_status_valid">验证通过</string>
     <string name="settings_key_status_warning">警告：%1$s</string>
+    <string name="settings_key_invalid_format">API Key 格式不正确</string>
 
     <!-- 设置：下载与外观 -->
     <string name="settings_section_download">下载</string>

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
@@ -64,6 +65,14 @@ fun TaskCard(
 ) {
     var expanded by remember(task.id) { mutableStateOf(false) }
     val failureMessage = task.failureMessage
+    // 展开区域没有可见按钮，屏幕阅读器只能依赖 OnClick 的动作标签说明点击结果。
+    val expansionActionLabel = stringResource(
+        if (expanded) {
+            R.string.task_failure_collapse_action
+        } else {
+            R.string.task_failure_expand_action
+        },
+    )
 
     Card(modifier = modifier.fillMaxWidth()) {
         Column(
@@ -80,7 +89,12 @@ fun TaskCard(
                         .weight(1f)
                         .then(
                             if (failureMessage != null) {
-                                Modifier.clickable { expanded = !expanded }
+                                Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("task_failure_toggle")
+                                    .clickable(onClickLabel = expansionActionLabel) {
+                                        expanded = !expanded
+                                    }
                             } else {
                                 Modifier
                             },
@@ -206,9 +220,18 @@ private fun MetaRow(task: TaskUiModel) {
         return
     }
 
+    val sameYearFormat = stringResource(R.string.date_format_current_year)
+    val otherYearFormat = stringResource(R.string.date_format_other_year)
     val details = buildList {
         if (task.completedAt != null) {
-            add(FileInfoFormatter.formatDate(task.completedAt, System.currentTimeMillis()))
+            add(
+                FileInfoFormatter.formatDate(
+                    task.completedAt,
+                    System.currentTimeMillis(),
+                    sameYearFormat,
+                    otherYearFormat,
+                ),
+            )
         }
         if (task.totalBytes != null) {
             add(FileInfoFormatter.formatBytes(task.totalBytes))
@@ -246,19 +269,34 @@ private fun ActionsRow(
         horizontalArrangement = Arrangement.End,
     ) {
         if (task.canPause) {
-            TaskAction(stringResource(R.string.action_pause)) { callbacks.onPause(task.id) }
+            TaskAction(
+                label = stringResource(R.string.action_pause),
+                testTag = "task_action_pause",
+            ) { callbacks.onPause(task.id) }
         }
         if (task.canResume) {
-            TaskAction(stringResource(R.string.action_resume)) { callbacks.onResume(task.id) }
+            TaskAction(
+                label = stringResource(R.string.action_resume),
+                testTag = "task_action_resume",
+            ) { callbacks.onResume(task.id) }
         }
         if (task.canRetry) {
-            TaskAction(stringResource(R.string.action_retry)) { callbacks.onRetry(task.id) }
+            TaskAction(
+                label = stringResource(R.string.action_retry),
+                testTag = "task_action_retry",
+            ) { callbacks.onRetry(task.id) }
         }
         if (task.canCancel) {
-            TaskAction(stringResource(R.string.action_cancel)) { callbacks.onCancel(task.id) }
+            TaskAction(
+                label = stringResource(R.string.action_cancel),
+                testTag = "task_action_cancel",
+            ) { callbacks.onCancel(task.id) }
         }
         if (task.canDelete) {
-            TaskAction(stringResource(R.string.action_delete_record)) {
+            TaskAction(
+                label = stringResource(R.string.action_delete_record),
+                testTag = "task_action_delete",
+            ) {
                 callbacks.onDelete(task.id, false)
             }
         }
@@ -278,10 +316,19 @@ private fun CompletedActionsRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
     ) {
-        TaskAction(stringResource(R.string.action_play)) { callbacks.onOpen(task.id) }
-        TaskAction(stringResource(R.string.action_share)) { callbacks.onShare(task.id) }
+        TaskAction(
+            label = stringResource(R.string.action_play),
+            testTag = "task_action_play",
+        ) { callbacks.onOpen(task.id) }
+        TaskAction(
+            label = stringResource(R.string.action_share),
+            testTag = "task_action_share",
+        ) { callbacks.onShare(task.id) }
         Box {
-            IconButton(onClick = { menuExpanded = true }) {
+            IconButton(
+                onClick = { menuExpanded = true },
+                modifier = Modifier.testTag("task_more_actions"),
+            ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
                     contentDescription = stringResource(R.string.more_actions_content_description),
@@ -378,9 +425,13 @@ private fun RedownloadQualityDialog(
 @Composable
 private fun TaskAction(
     label: String,
+    testTag: String,
     onClick: () -> Unit,
 ) {
-    TextButton(onClick = onClick) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.testTag(testTag),
+    ) {
         Text(text = label)
     }
 }

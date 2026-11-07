@@ -33,14 +33,29 @@ class FileInfoFormatterTest {
     fun `unknown values render a placeholder`() {
         assertEquals("—", FileInfoFormatter.formatBytes(null))
         assertEquals("—", FileInfoFormatter.formatSpeed(null))
-        assertEquals("—", FileInfoFormatter.formatDate(null, NOW_MILLIS, ZONE))
+        assertEquals(
+            "—",
+            FileInfoFormatter.formatDate(
+                null,
+                NOW_MILLIS,
+                SAME_YEAR_FORMAT,
+                OTHER_YEAR_FORMAT,
+                ZONE,
+            ),
+        )
     }
 
     @Test
     fun `date uses month day and time within the current year`() {
         assertEquals(
             "11月7日 12:30",
-            FileInfoFormatter.formatDate(SAME_YEAR_MILLIS, NOW_MILLIS, ZONE),
+            FileInfoFormatter.formatDate(
+                SAME_YEAR_MILLIS,
+                NOW_MILLIS,
+                SAME_YEAR_FORMAT,
+                OTHER_YEAR_FORMAT,
+                ZONE,
+            ),
         )
     }
 
@@ -48,7 +63,13 @@ class FileInfoFormatterTest {
     fun `date includes the year when it differs from the current year`() {
         assertEquals(
             "2025年12月31日 12:30",
-            FileInfoFormatter.formatDate(PREVIOUS_YEAR_MILLIS, NOW_MILLIS, ZONE),
+            FileInfoFormatter.formatDate(
+                PREVIOUS_YEAR_MILLIS,
+                NOW_MILLIS,
+                SAME_YEAR_FORMAT,
+                OTHER_YEAR_FORMAT,
+                ZONE,
+            ),
         )
     }
 
@@ -76,5 +97,9 @@ class FileInfoFormatterTest {
         val PREVIOUS_YEAR_MILLIS: Long = Instant.parse("2025-12-31T04:30:00Z").toEpochMilli()
 
         val ZONE: ZoneId = ZoneId.of("Asia/Shanghai")
+
+        /** 与 strings.xml 中的日期资源保持一致，断言用户可见输出不因迁移资源而改变。 */
+        const val SAME_YEAR_FORMAT = "%1\$d月%2\$d日 %3\$s"
+        const val OTHER_YEAR_FORMAT = "%1\$d年%2\$d月%3\$d日 %4\$s"
     }
 }

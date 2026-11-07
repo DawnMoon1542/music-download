@@ -86,7 +86,10 @@ fun SettingsScreen(
         TopAppBar(
             title = { Text(stringResource(R.string.settings_title)) },
             navigationIcon = {
-                IconButton(onClick = onBack) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.testTag("settings_back"),
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.back_content_description),
@@ -373,7 +376,8 @@ private fun KeyStatus.label(): String = when (this) {
     KeyStatus.Idle -> stringResource(R.string.settings_key_status_idle)
     KeyStatus.Validating -> stringResource(R.string.settings_key_status_validating)
     KeyStatus.Valid -> stringResource(R.string.settings_key_status_valid)
-    is KeyStatus.Invalid -> message
+    is KeyStatus.Invalid -> message?.takeIf { it.isNotBlank() }
+        ?: messageRes?.let { stringResource(it) }.orEmpty()
     is KeyStatus.NetworkError -> stringResource(R.string.settings_key_status_warning, message)
 }
 

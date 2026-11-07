@@ -1,7 +1,9 @@
 package com.dawnmoon.music_download.ui.viewmodel
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.dawnmoon.music_download.R
 import com.dawnmoon.music_download.data.repository.AppSettings
 import com.dawnmoon.music_download.data.repository.KeyValidator
 import com.dawnmoon.music_download.data.repository.QuotaStore
@@ -33,8 +35,16 @@ sealed interface KeyStatus {
     /** 服务端确认 Key 有效。 */
     data object Valid : KeyStatus
 
-    /** Key 确定无效，不应保存。 */
-    data class Invalid(val message: String) : KeyStatus
+    /**
+     * Key 确定无效，不应保存。
+     *
+     * 本地格式错误没有服务端原文，用 [messageRes] 交给界面取资源；服务端返回的无效原因
+     * 放在 [message] 中，两者互斥。
+     */
+    data class Invalid(
+        val message: String? = null,
+        @StringRes val messageRes: Int? = null,
+    ) : KeyStatus
 
     /** 无法判定 Key 是否有效；Key 已保存，界面展示警告。 */
     data class NetworkError(val message: String) : KeyStatus
@@ -143,7 +153,7 @@ class SettingsViewModel(
         if (keyStatus.value is KeyStatus.Validating) return
         val draft = apiKeyDraft.value
         if (!API_KEY_PATTERN.matches(draft)) {
-            keyStatus.value = KeyStatus.Invalid(INVALID_FORMAT_MESSAGE)
+            keyStatus.value = KeyStatus.Invalid(messageRes = R.string.settings_key_invalid_format)
             return
         }
         keyStatus.value = KeyStatus.Validating
@@ -217,7 +227,6 @@ class SettingsViewModel(
          */
         val API_KEY_PATTERN = Regex("^chksz_[A-Za-z0-9._~-]+$")
 
-        const val INVALID_FORMAT_MESSAGE = "API Key 格式不正确"
         const val MIN_CONCURRENCY = 1
         const val MAX_CONCURRENCY = 5
         const val DEFAULT_CONCURRENCY = 3
