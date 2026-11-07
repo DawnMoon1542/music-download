@@ -363,6 +363,127 @@ class DownloadEngineTest {
     }
 
     @Test
+    fun `resuming all counts recovered tasks in the download session`() = engineTest(concurrency = 2) { harness ->
+        val gates = DownloadGates()
+        harness.downloader.behavior = { id ->
+            val size = harness.repo.byId(id)?.sizeBytes ?: 0L
+            harness.repo.updateProgress(id, size / 2)
+            // 先取得一个进度样本，再推进注入时钟并补一次进度，速度窗口才有非零差值。
+            delay(750)
+            harness.clock.advance(1_000L)
+            harness.repo.updateProgress(id, size / 2 + 100L)
+            gates.waitFor(id)
+            harness.downloader.complete(id)
+        }
+        // 直接放入已解析的暂停任务，会话集合初始为空，只能由 resumeAll 的补投路径建立。
+        harness.repo.add(pausedTask(1, resolved = true))
+        harness.repo.add(pausedTask(2, resolved = true))
+
+        harness.engine.resumeAll()
+        advanceTimeBy(2_000)
+        runCurrent()
+
+        assertEquals(TaskStatus.Downloading, harness.repo.byId(1)?.status)
+        assertEquals(TaskStatus.Downloading, harness.repo.byId(2)?.status)
+        val during = harness.engine.snapshot.value
+        assertEquals(
+            "a task recovered by resumeAll must join the session",
+            2,
+            during.totalInSession,
+        )
+        assertEquals(
+            "the session total must include every recovered task's size",
+            2_003L,
+            during.bytesTotal,
+        )
+        assertTrue("recovered tasks must contribute progress", during.bytesDone > 0L)
+        assertTrue(
+            "recovered downloads must report a sampled speed",
+            during.speedBytesPerSecond > 0L,
+        )
+        assertTrue(
+            "the notification must receive the recovered session totals",
+            harness.notifier.updates.any { it.totalInSession == 2 && it.bytesTotal == 2_003L },
+        )
+
+        gates.release(1)
+        advanceTimeBy(1_500)
+        runCurrent()
+
+        val oneFinished = harness.engine.snapshot.value
+        assertEquals(
+            "a finished recovered task must count as completed in the session",
+            1,
+            oneFinished.completedInSession,
+        )
+        assertEquals(
+            "the remaining recovered task must keep the session size at two",
+            2,
+            oneFinished.totalInSession,
+        )
+        assertEquals(2_003L, oneFinished.bytesTotal)
+
+        gates.releaseAll()
+        advanceTimeBy(5_000)
+        runCurrent()
+    }
+
+    @Test
+    fun `a task redispatched after resuming a key failure joins the session`() = engineTest { harness ->
+        val gate = CompletableDeferred<Unit>()
+        harness.repo.add(queuedTask(1))
+        harness.repo.add(queuedTask(2))
+        harness.resolver.behavior = { _, _, _ -> ApiResponse.Failure(ApiFailure.InvalidKey("bad key"), null) }
+
+        harness.engine.requestDownload(listOf(1))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(TaskStatus.Failed, harness.repo.byId(1)?.status)
+        assertEquals(TaskStatus.Queued, harness.repo.byId(2)?.status)
+        assertEquals(
+            "a key-level failure must stop parsing before the queued task is dispatched",
+            listOf(1L),
+            harness.resolver.requestedSongIds,
+        )
+
+        harness.resolver.behavior = { songId, _, _ -> ApiResponse.Success(resolvedTrack(songId), null) }
+        harness.downloader.behavior = { id ->
+            if (id == 2L) {
+                harness.repo.updateProgress(id, 500L)
+                gate.await()
+            }
+            harness.downloader.complete(id)
+        }
+        // 解析暂停期间引擎可能已经空闲并清空会话，因此只断言本次恢复带来的增量。
+        val sessionBeforeResume = harness.engine.snapshot.value.totalInSession
+        harness.engine.resume(1)
+        advanceTimeBy(2_000)
+        runCurrent()
+
+        assertEquals(
+            "resuming must redispatch the task stranded by the parse pause",
+            TaskStatus.Downloading,
+            harness.repo.byId(2)?.status,
+        )
+        assertEquals(
+            "a redispatched task must join the session on top of whatever remains",
+            sessionBeforeResume + 1,
+            harness.engine.snapshot.value.totalInSession,
+        )
+
+        gate.complete(Unit)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        assertEquals(TaskStatus.Completed, harness.repo.byId(2)?.status)
+        assertEquals(
+            "the session counters must still reset once nothing remains",
+            0,
+            harness.engine.snapshot.value.totalInSession,
+        )
+    }
+
+    @Test
     fun `cancelling all cancels jobs and removes every pending file once`() = engineTest(concurrency = 2) { harness ->
         val gates = DownloadGates()
         harness.downloader.behavior = { id ->
@@ -919,6 +1040,7 @@ class DownloadEngineTest {
 
     @Test
     fun `requesting a download after a key failure redispatches other queued tasks`() = engineTest { harness ->
+        val gates = DownloadGates()
         harness.repo.add(queuedTask(1))
         harness.repo.add(queuedTask(2))
         harness.resolver.behavior = { _, _, _ -> ApiResponse.Failure(ApiFailure.InvalidKey("bad key"), null) }
@@ -928,10 +1050,41 @@ class DownloadEngineTest {
         runCurrent()
         assertEquals(TaskStatus.Failed, harness.repo.byId(1)?.status)
         assertEquals(TaskStatus.Queued, harness.repo.byId(2)?.status)
+        // 解析暂停期间会话可能已被空闲规则清空，补投前只记录基线，用增量判断补投是否计入。
+        val sessionBeforeRedispatch = harness.engine.snapshot.value.totalInSession
 
         harness.resolver.behavior = { songId, _, _ -> ApiResponse.Success(resolvedTrack(songId), null) }
+        harness.downloader.behavior = { id ->
+            if (id == 2L) {
+                harness.repo.updateProgress(id, 500L)
+                gates.waitFor(id)
+            }
+            harness.downloader.complete(id)
+        }
         harness.repo.add(queuedTask(3))
         harness.engine.requestDownload(listOf(3))
+        advanceTimeBy(2_000)
+        runCurrent()
+
+        assertEquals(
+            "the redispatched task must be held in the download loop for the session check",
+            TaskStatus.Downloading,
+            harness.repo.byId(2)?.status,
+        )
+        assertEquals(TaskStatus.Completed, harness.repo.byId(3)?.status)
+        val during = harness.engine.snapshot.value
+        assertEquals(
+            "the redispatched task and the newly requested task must both join the session",
+            sessionBeforeRedispatch + 2,
+            during.totalInSession,
+        )
+        assertEquals(
+            "the session bytes must include the redispatched task's progress",
+            1_503L,
+            during.bytesDone,
+        )
+
+        gates.releaseAll()
         advanceTimeBy(5_000)
         runCurrent()
 

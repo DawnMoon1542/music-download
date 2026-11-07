@@ -50,6 +50,8 @@
 - [x] Task 2-修复3：向 Stage 3 暴露 TaskFileStore
 - [x] Task 2-修复4：416 响应立即截断待下载文件
 - [x] Task 2-修复5：补充 FileNamer 测试并收尾下载初始化异常
+- [x] Task 2-修复6：恢复与补投任务计入下载会话统计
+- [ ] Task 2-修复7：搁置任务不再阻止服务空闲自停
 
 ---
 
@@ -545,3 +547,71 @@
 #### Step 3：验证与整理
 
 `./gradlew :app:testDebugUnitTest` 通过；确认初始化异常后任务落为 `Failed`、引擎可正常进入空闲且无残留 pending 文件。
+
+---
+
+### Task 2-修复6：恢复与补投任务计入下载会话统计
+
+**依赖：** Task 3-2
+
+**文件：**
+- 修改：`app/src/main/java/com/dawnmoon/music_download/download/DownloadEngine.kt`
+- 测试：`app/src/test/java/com/dawnmoon/music_download/download/DownloadEngineTest.kt`
+
+**提交信息：**
+
+`fix: 恢复与补投任务计入下载会话统计`
+
+#### Step 1：编写失败测试
+
+- 新增用例「resumeAll 把恢复的任务计入会话统计」：`engineTest(concurrency = 2)` 中直接向仓库放入两个已解析的暂停任务 `pausedTask(1, resolved = true)`、`pausedTask(2, resolved = true)`（`sizeBytes` 分别为 1000+id），不经过 `requestDownload`，使 `sessionIds` 初始为空；用 `DownloadGates` 卡住 `EngineFakeDownloader.behavior`，在 `waitFor` 前调用 `repo.updateProgress(id, sizeBytes / 2)`，`delay(750)` 后 `harness.clock.advance(1_000)` 制造速度采样窗口。`engine.resumeAll()` 后推进虚拟时间，直到两个任务均处于 `Downloading`。断言 `snapshot.totalInSession == 2`、`snapshot.bytesTotal == 2_003L`（1001 + 1002）、`snapshot.bytesDone > 0`、`snapshot.speedBytesPerSecond > 0`，并断言 `EngineFakeNotifier.updates.any { it.totalInSession == 2 && it.bytesTotal == 2_003L }`（覆盖 `DownloadNotifications.bodyText` 的真实输入）。
+- 同一用例中 `gates.release(1)` 后推进时间，断言 `completedInSession == 1`、`totalInSession == 2`、`bytesTotal == 2_003L`，排除「已完成 1/0」；最后 `gates.releaseAll()` 并推进时间收尾，清理残留作业。
+- 新增用例「Key 失败后 resume 补投的任务计入会话」：`repo.add(queuedTask(1))`、`repo.add(queuedTask(2))`，`resolver.behavior` 返回 `ApiResponse.Failure(ApiFailure.InvalidKey(...), null)`，先 `engine.requestDownload(listOf(1))`（任务 2 未在首批请求中入队，仅停留在仓库 Queued），推进后断言任务 1 `Failed`、任务 2 仍 `Queued` 且 `parsePaused` 生效（无后续解析）。恢复 resolver 为成功响应，调用 `engine.resume(1)` 清除解析暂停并触发 `redispatchPending(exclude = setOf(1))` 补投任务 2；推进时间后断言任务 2 `Completed`，且该次恢复后快照的 `totalInSession == 2`（任务 1 的失败记录仍留在会话语义中）、`completedInSession == 1`；推进到空闲后再断言 `totalInSession == 0`（不改动既有清空规则）。
+- 运行 `./gradlew :app:testDebugUnitTest`，确认新用例失败：修复前 `resumeAll` 与补投路径均未写入 `sessionIds`，首个用例的 `totalInSession` 为 0、`bytesTotal` 为 0，速度恒为 0；第二个用例 `resume` 后 `totalInSession` 仅为 1（或补投任务完成数未计入）。
+
+#### Step 2：实现最终行为
+
+- 在 `redispatchParsing` 中，对实际 `parseQueue.send(id)` 的每个任务执行 `sessionIds += id`；先收集待投递列表再逐项 `send`，保证只统计真正入队的 id。
+- 在 `redispatchPending` 中，对实际 `parseQueue.send(it.id)` 与 `downloadQueue.send(it.id)` 的任务分别执行 `sessionIds += id`。
+- 上述两个方法被 `resume`、`resumeAll`、`retry`、`retryAllFailed` 共用，`sessionIds` 为 `Set`，重复加入幂等，不改变已有会话计数语义；仅 Queued/Waiting 会被投递，终态任务与未实际投递的 id 不会被加入。
+- `resumeAll` 无需额外改动：`repo.resumeAll()` 把暂停任务变为 Queued/Waiting 后，统一经 `redispatchPending` 覆盖（含进程重启后恢复的暂停任务、全部暂停后再继续、Key 失败后补投的 Queued 任务）。
+- 保持 `refreshSnapshot` 在空闲时清空 `sessionIds` 的既有规则，以及 `sessionBytes/sessionTotals` 的采样方式不变。
+
+#### Step 3：验证与整理
+
+`./gradlew :app:testDebugUnitTest` 通过；确认既有「resuming all requeues paused tasks」「the snapshot keeps completed bytes and totals after a task finishes」「the snapshot reports progress and speed while a download is running」等 idle/快照用例不回归。
+
+---
+
+### Task 2-修复7：搁置任务不再阻止服务空闲自停
+
+**依赖：** Task 3-2、Task 2-修复1（服务停止后的控制操作需重新拉起服务并重放）；与 Task 2-修复6 无先后依赖
+
+**文件：**
+- 修改：`app/src/main/java/com/dawnmoon/music_download/download/DownloadEngine.kt`
+- 测试：`app/src/test/java/com/dawnmoon/music_download/download/DownloadEngineTest.kt`
+
+**提交信息：**
+
+`fix: 搁置任务不再阻止服务空闲自停`
+
+#### Step 1：编写失败测试
+
+- 新增用例「a key-level parse failure lets the service go idle with stranded queued tasks」：`repo.add(queuedTask(1))`、`repo.add(queuedTask(2))`，`resolver.behavior` 返回 `ApiResponse.Failure(ApiFailure.InvalidKey(...), null)`；`engine.requestDownload(listOf(1, 2))` 后推进 1 秒，断言任务 1 `Failed`、任务 2 仍 `Queued`、`stopper.stopCount == 0`；再 `advanceTimeBy(2_000)`，断言 `stopper.stopCount == 1`（修复前 `anyPending` 把 Queued 计入待办，`stopCount` 恒为 0）。
+- 新增用例「a storage failure lets the service go idle with stranded waiting tasks and resume recovers」：`downloader.behavior` 对任务 1 返回 `fail(1, FailureKind.Storage)`，对任务 2 `complete(2)`；`repo.add(waitingTask(1))`、`repo.add(waitingTask(2))`，`engine.requestDownload(listOf(1, 2))` 后推进 1 秒（不足以触发 2 秒空闲阈值），断言任务 1 `Failed`、任务 2 仍 `Waiting`、`2L !in downloader.started`、`stopper.stopCount == 0`；再 `advanceTimeBy(2_000)`，断言 `stopper.stopCount == 1`。随后调用 `engine.resumeAll()`，推进 5 秒，断言 `poolPaused` 被清除（`snapshot.value.isPaused == false`）、任务 2 `Completed` 且 `2L in downloader.started`，验证空闲自停后控制操作仍可恢复。
+- 运行 `./gradlew :app:testDebugUnitTest`，确认两个新用例的 `stopCount` 断言失败（现状为 0）。
+
+#### Step 2：实现最终行为
+
+- 在 `refreshSnapshot` 中把 idle 判定拆成实际已派发/在途的工作：
+  - `queuedWork = !parseQueue.isEmpty || !downloadQueue.isEmpty`；
+  - `pendingActive = tasks.any { it.status == TaskStatus.Resolving || it.status == TaskStatus.Downloading }`；
+  - `pendingQueued = !parsePaused && tasks.any { it.status == TaskStatus.Queued }`；
+  - `pendingWaiting = !poolPaused && tasks.any { it.status == TaskStatus.Waiting }`；
+  - `anyPending = queuedWork || pendingActive || pendingQueued || pendingWaiting || downloadJobs.isNotEmpty()`；`idle = !anyPending`。
+- 暂停标志置位后被循环丢弃的 Queued/Waiting 任务不再阻止空闲；`parsePaused/poolPaused` 的清除仍由既有 `resume`、`resumeAll`、`retry`、`requestDownload` 路径负责，不在 `refreshSnapshot` 中额外清空。服务停止后这些控制操作由 Task 2-修复1 的 `ensureServiceStarted` 重新拉起服务并重放，恢复时由 Task 2-修复6 保证补投任务计入会话。
+- 保持 `refreshSnapshot` 在 `ParseWorker.onTaskFinished` 与下载作业 `finally` 中的调用时序，使暂停标志置位和队列耗尽后能立即重新评估 idle。
+
+#### Step 3：验证与整理
+
+`./gradlew :app:testDebugUnitTest` 通过；确认既有「the service stopper runs after two idle seconds」「a failed parse still triggers the idle stop」「a storage failure pauses the pool until everything is resumed」用例不回归。

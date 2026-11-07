@@ -525,19 +525,29 @@ class DownloadEngine(
 
     /** 重新投递仍处于 Queued 的任务，供解析暂停恢复后使用。 */
     private suspend fun redispatchParsing(exclude: Set<Long> = emptySet()) {
-        repo.pendingIds()
+        val tasks = repo.pendingIds()
             .mapNotNull { repo.byId(it) }
             .filter { it.status == TaskStatus.Queued && it.id !in exclude }
-            .forEach { parseQueue.send(it.id) }
+        // 只有真正投递进解析队列的任务才计入会话；重复加入由 Set 幂等处理。
+        for (task in tasks) {
+            parseQueue.send(task.id)
+            sessionIds += task.id
+        }
     }
 
     /** 重新投递所有可推进的任务；暂停标志清除后用于恢复被循环丢弃的队列项。 */
     private suspend fun redispatchPending(exclude: Set<Long> = emptySet()) {
         val tasks = repo.pendingIds().mapNotNull { repo.byId(it) }
-        tasks.filter { it.status == TaskStatus.Queued && it.id !in exclude }
-            .forEach { parseQueue.send(it.id) }
-        tasks.filter { it.status == TaskStatus.Waiting && it.id !in exclude }
-            .forEach { downloadQueue.send(it.id) }
+        val toParse = tasks.filter { it.status == TaskStatus.Queued && it.id !in exclude }
+        val toDownload = tasks.filter { it.status == TaskStatus.Waiting && it.id !in exclude }
+        for (task in toParse) {
+            parseQueue.send(task.id)
+            sessionIds += task.id
+        }
+        for (task in toDownload) {
+            downloadQueue.send(task.id)
+            sessionIds += task.id
+        }
     }
 
     private suspend fun cancelDownloadJob(id: Long, signal: CancellationSignal) {
