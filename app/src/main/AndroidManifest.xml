@@ -31,6 +31,21 @@
             </intent-filter>
         </activity>
 
+        <!--
+            分享入口无界面：透明主题并在处理完文本后立即 finish。
+            只接收纯文本，避免出现在图片、文件的分享目标里。
+        -->
+        <activity
+            android:name=".ui.ShareActivity"
+            android:exported="true"
+            android:theme="@style/Theme.MusicDownload.Transparent">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".download.DownloadService"
             android:exported="false"

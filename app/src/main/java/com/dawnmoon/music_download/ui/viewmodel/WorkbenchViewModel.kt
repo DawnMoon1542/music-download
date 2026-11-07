@@ -9,7 +9,6 @@ import androidx.lifecycle.viewModelScope
 import com.dawnmoon.music_download.R
 import com.dawnmoon.music_download.core.AppClock
 import com.dawnmoon.music_download.data.repository.AppSettings
-import com.dawnmoon.music_download.data.repository.EnqueueOutcome
 import com.dawnmoon.music_download.data.repository.QuotaStore
 import com.dawnmoon.music_download.data.repository.TaskRepository
 import com.dawnmoon.music_download.domain.model.DownloadTask
@@ -57,6 +56,9 @@ class WorkbenchViewModel(
 ) : ViewModel() {
 
     private val historyActions = HistoryActions(repo, fileStore, engine, appContext)
+
+    /** 与系统分享入口共享的入队、引擎启动与提示文案逻辑。 */
+    private val enqueueDownloads = EnqueueDownloads(repo, settings, engine, appContext, sdkInt)
 
     private val input = MutableStateFlow("")
 
@@ -180,18 +182,27 @@ class WorkbenchViewModel(
         isEnqueuing.value = true
         viewModelScope.launch {
             try {
-                val outcome = repo.enqueue(input.value, state.value.selectedQuality)
-                when (outcome) {
-                    is EnqueueOutcome.MissingApiKey -> {
+                when (val result = enqueueDownloads.enqueue(
+                    input.value,
+                    state.value.selectedQuality,
+                )) {
+                    is EnqueueResult.MissingApiKey -> {
                         eventChannel.trySend(WorkbenchEvent.OpenSettings(focusKey = true))
                     }
 
-                    is EnqueueOutcome.NoLinks -> {
-                        eventChannel.trySend(WorkbenchEvent.Snackbar(text(R.string.enqueue_no_links)))
+                    is EnqueueResult.NoLinks -> {
+                        eventChannel.trySend(WorkbenchEvent.Snackbar(result.message))
                     }
 
-                    is EnqueueOutcome.Enqueued -> {
-                        handleEnqueued(outcome)
+                    is EnqueueResult.Enqueued -> {
+                        if (result.outcome.created.isNotEmpty()) {
+                            input.value = ""
+                            selectedTab.value = WorkbenchTab.InProgress
+                        }
+                        eventChannel.trySend(WorkbenchEvent.Snackbar(result.message))
+                        if (result.notificationPermissionNeeded) {
+                            eventChannel.trySend(WorkbenchEvent.RequestNotificationPermission)
+                        }
                     }
                 }
             } finally {
@@ -345,43 +356,6 @@ class WorkbenchViewModel(
 
     private fun showFileMissing() {
         eventChannel.trySend(WorkbenchEvent.Snackbar(text(R.string.history_file_missing)))
-    }
-
-    private suspend fun handleEnqueued(outcome: EnqueueOutcome.Enqueued) {
-        if (outcome.created.isNotEmpty()) {
-            engine.start(appContext)
-            engine.requestDownload(outcome.created)
-            input.value = ""
-            selectedTab.value = WorkbenchTab.InProgress
-            requestNotificationPermissionIfNeeded()
-        }
-
-        val parts = buildList {
-            if (outcome.created.isNotEmpty()) {
-                add(text(R.string.enqueue_success, outcome.created.size))
-            }
-            if (outcome.duplicates > 0) {
-                add(text(R.string.enqueue_skipped, outcome.duplicates))
-            }
-            if (outcome.failures.isNotEmpty()) {
-                add(text(R.string.enqueue_unrecognized, outcome.failures.size))
-            }
-        }
-        val message = parts.ifEmpty { listOf(text(R.string.enqueue_nothing)) }.joinToString("；")
-        eventChannel.trySend(WorkbenchEvent.Snackbar(message))
-    }
-
-    /**
-     * 在下载已经启动后请求一次通知权限。
-     *
-     * 事件发出时立即写入"已询问"标记：权限弹窗的结果不影响下载，也不等待用户选择，
-     * 因此不能把标记推迟到结果回调，否则重复入队会再次弹窗。
-     */
-    private suspend fun requestNotificationPermissionIfNeeded() {
-        if (sdkInt < Build.VERSION_CODES.TIRAMISU) return
-        if (settings.notificationAsked.first()) return
-        settings.markNotificationAsked()
-        eventChannel.trySend(WorkbenchEvent.RequestNotificationPermission)
     }
 
     /**
