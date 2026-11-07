@@ -337,6 +337,11 @@ class DefaultDownloadWorker(
             var decision: Decision = Decision.Continue
             try {
                 response.use { result ->
+                    // ETag 必须在读取响应体之前取得：写入中断后下一次 Range 请求要靠它
+                    // 通过 If-Range 证明服务端内容未变，否则续传可能把另一份文件拼进来。
+                    if (result.isSuccessful) {
+                        workingTask = captureEtag(workingTask, result.header("ETag"))
+                    }
                     when {
                         result.code == HTTP_PARTIAL_CONTENT -> {
                             val total = contentRangeTotal(result.header("Content-Range"))
@@ -586,6 +591,40 @@ class DefaultDownloadWorker(
 
             else -> false
         }
+    }
+
+    /**
+     * 捕获成功响应头中的 ETag 并持久化，供后续续传用 `If-Range` 校验内容未变。
+     *
+     * 只有任务已有 MD5 时才写入：构造的 [ResolvedTrack] 复用任务现有元数据、仅替换 etag，
+     * 使仓库的 `provesSameContent` 走 MD5 分支，从而保留已写字节与文件绑定。缺少 MD5 时
+     * 无法证明内容一致，若贸然写入仓库会按未知内容处理而清零进度并解除文件绑定。
+     *
+     * 返回带上新 ETag 的任务副本，让当前循环里紧接着的 Range 请求立即带 `If-Range`。
+     */
+    private suspend fun captureEtag(task: DownloadTask, etag: String?): DownloadTask {
+        val md5 = task.md5 ?: return task
+        if (etag == null || etag == task.etag) return task
+        val songId = task.songId ?: return task
+        val streamUrl = task.streamUrl ?: return task
+        repo.updateStream(
+            task.id,
+            ResolvedTrack(
+                songId = songId,
+                title = task.title.orEmpty(),
+                artist = task.artist.orEmpty(),
+                album = task.album,
+                artworkUrl = task.artworkUrl,
+                requestedQuality = task.requestedQuality,
+                actualQuality = task.actualQuality ?: task.requestedQuality,
+                format = resolveFormat(task),
+                streamUrl = streamUrl,
+                sizeBytes = task.sizeBytes,
+                md5 = md5,
+                etag = etag,
+            ),
+        )
+        return task.copy(etag = etag)
     }
 
     private fun buildRequest(url: String, start: Long, etag: String?): Request =

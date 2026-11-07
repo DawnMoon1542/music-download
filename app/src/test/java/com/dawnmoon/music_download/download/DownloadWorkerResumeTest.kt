@@ -45,6 +45,7 @@ private const val FULL_SIZE = 100 * 1024
 private const val RESUME_AT = 40 * 1024
 private const val CHUNK_SIZE = 64 * 1024
 private const val ETAG = "etag-1"
+private const val RESPONSE_ETAG = "\"v1\""
 
 /**
  * [DefaultDownloadWorker] 断点续传与直链过期换链的契约测试。
@@ -183,6 +184,209 @@ class DownloadWorkerResumeTest {
             content,
             fileStore.contentOf(file.mediaStoreId),
         )
+    }
+
+    @Test
+    fun `captures the response etag to guard the range after an interrupted write`() = runTest {
+        val content = sampleBytes(FULL_SIZE)
+        val delegate = FakeTaskFileStore(tempFolder.newFolder())
+        val file = seedFile(delegate, content, RESUME_AT)
+        val fileStore = InterruptingFileStore(delegate)
+        fileStore.failTruncateAfterBytes = 4 * 1024
+        val repo = ResumableTaskRepository(
+            task(
+                sizeBytes = content.size.toLong(),
+                md5 = md5Hex(content),
+                streamUrl = streamUrl("/audio"),
+                etag = null,
+                bytesDownloaded = RESUME_AT.toLong(),
+                mediaStoreId = file.mediaStoreId,
+                fileName = file.displayName,
+            ),
+        )
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "audio/mpeg")
+                .addHeader("ETag", RESPONSE_ETAG)
+                .body(Buffer().write(content))
+                .build(),
+        )
+        val rewritten = 4 * 1024
+        enqueuePartial(content, rewritten)
+
+        val result = worker(repo, fileStore, QueueTrackResolver()).execute(TASK_ID)
+
+        assertEquals(WorkerResult.Completed, result)
+        assertEquals("bytes=$RESUME_AT-", server.takeRequest().headers["Range"])
+        val resumedRequest = server.takeRequest()
+        assertEquals(
+            "the etag learned from the successful response must guard the resumed range",
+            RESPONSE_ETAG,
+            resumedRequest.headers["If-Range"],
+        )
+        assertEquals("bytes=$rewritten-", resumedRequest.headers["Range"])
+        assertEquals(
+            "the etag from the response must be persisted on the task",
+            RESPONSE_ETAG,
+            repo.streamUpdates.lastOrNull()?.etag,
+        )
+        assertEquals(
+            "recording the etag must keep the bytes already written",
+            RESUME_AT.toLong(),
+            repo.bytesAtStreamUpdate,
+        )
+        assertEquals(RESPONSE_ETAG, repo.task.etag)
+        assertArrayEquals(content, delegate.contentOf(file.mediaStoreId))
+    }
+
+    @Test
+    fun `captures the etag from a partial response to guard the next range`() = runTest {
+        val content = sampleBytes(FULL_SIZE)
+        val delegate = FakeTaskFileStore(tempFolder.newFolder())
+        val file = seedFile(delegate, content, RESUME_AT)
+        val fileStore = InterruptingFileStore(delegate)
+        fileStore.failAppendAfterBytes = 4 * 1024
+        val repo = ResumableTaskRepository(
+            task(
+                sizeBytes = content.size.toLong(),
+                md5 = md5Hex(content),
+                streamUrl = streamUrl("/audio"),
+                etag = null,
+                bytesDownloaded = RESUME_AT.toLong(),
+                mediaStoreId = file.mediaStoreId,
+                fileName = file.displayName,
+            ),
+        )
+        server.enqueue(
+            MockResponse.Builder()
+                .code(206)
+                .addHeader("Content-Type", "audio/mpeg")
+                .addHeader("Content-Range", "bytes $RESUME_AT-${content.size - 1}/${content.size}")
+                .addHeader("ETag", RESPONSE_ETAG)
+                .body(Buffer().write(content, RESUME_AT, content.size - RESUME_AT))
+                .build(),
+        )
+        val resumedAt = RESUME_AT + 4 * 1024
+        enqueuePartial(content, resumedAt)
+
+        val result = worker(repo, fileStore, QueueTrackResolver()).execute(TASK_ID)
+
+        assertEquals(WorkerResult.Completed, result)
+        val firstRequest = server.takeRequest()
+        assertEquals("bytes=$RESUME_AT-", firstRequest.headers["Range"])
+        assertNull(
+            "an unknown etag must not be sent before it is learned",
+            firstRequest.headers["If-Range"],
+        )
+        val resumedRequest = server.takeRequest()
+        assertEquals("bytes=$resumedAt-", resumedRequest.headers["Range"])
+        assertEquals(
+            "the etag learned from a partial response must guard the resumed range",
+            RESPONSE_ETAG,
+            resumedRequest.headers["If-Range"],
+        )
+        assertEquals(
+            "the etag from a partial response must be persisted on the task",
+            RESPONSE_ETAG,
+            repo.streamUpdates.lastOrNull()?.etag,
+        )
+        assertEquals(
+            "recording the etag must keep the bytes already written",
+            RESUME_AT.toLong(),
+            repo.bytesAtStreamUpdate,
+        )
+        assertEquals(RESPONSE_ETAG, repo.task.etag)
+        assertArrayEquals(content, delegate.contentOf(file.mediaStoreId))
+    }
+
+    @Test
+    fun `skips etag capture when the task has no md5 to prove the content`() = runTest {
+        val content = sampleBytes(FULL_SIZE)
+        val delegate = FakeTaskFileStore(tempFolder.newFolder())
+        val file = seedFile(delegate, content, RESUME_AT)
+        val fileStore = InterruptingFileStore(delegate)
+        fileStore.failAppendAfterBytes = 4 * 1024
+        val repo = ResumableTaskRepository(
+            task(
+                sizeBytes = content.size.toLong(),
+                md5 = null,
+                streamUrl = streamUrl("/audio"),
+                etag = null,
+                bytesDownloaded = RESUME_AT.toLong(),
+                mediaStoreId = file.mediaStoreId,
+                fileName = file.displayName,
+            ),
+        )
+        server.enqueue(
+            MockResponse.Builder()
+                .code(206)
+                .addHeader("Content-Type", "audio/mpeg")
+                .addHeader("Content-Range", "bytes $RESUME_AT-${content.size - 1}/${content.size}")
+                .addHeader("ETag", RESPONSE_ETAG)
+                .body(Buffer().write(content, RESUME_AT, content.size - RESUME_AT))
+                .build(),
+        )
+        repeat(3) { server.enqueue(MockResponse.Builder().code(500).build()) }
+
+        val result = worker(repo, fileStore, QueueTrackResolver()).execute(TASK_ID)
+
+        assertEquals(WorkerResult.Failed(FailureKind.ServiceUnavailable), result)
+        assertEquals(TaskStatus.Failed, repo.task.status)
+        assertTrue(
+            "an unverifiable etag must not detach the file from the task",
+            repo.streamUpdates.isEmpty(),
+        )
+        assertEquals(
+            "the pending entry must stay bound after an unverifiable etag",
+            file.mediaStoreId,
+            repo.task.mediaStoreId,
+        )
+        assertEquals(
+            "the downloaded bytes must survive an unverifiable etag",
+            RESUME_AT.toLong(),
+            repo.task.bytesDownloaded,
+        )
+        assertNull("an unverifiable etag must not guard later ranges", repo.task.etag)
+        assertEquals("bytes=$RESUME_AT-", server.takeRequest().headers["Range"])
+        val resumedRequest = server.takeRequest()
+        assertEquals("bytes=${RESUME_AT + 4 * 1024}-", resumedRequest.headers["Range"])
+        assertNull(
+            "a task without md5 must not send an etag it cannot verify",
+            resumedRequest.headers["If-Range"],
+        )
+    }
+
+    @Test
+    fun `persists the etag received with a successful response when the task completes`() = runTest {
+        val content = sampleBytes(FULL_SIZE)
+        val fileStore = FakeTaskFileStore(tempFolder.newFolder())
+        val repo = ResumableTaskRepository(
+            task(
+                sizeBytes = content.size.toLong(),
+                md5 = md5Hex(content),
+                streamUrl = streamUrl("/audio"),
+                etag = null,
+            ),
+        )
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "audio/mpeg")
+                .addHeader("ETag", RESPONSE_ETAG)
+                .body(Buffer().write(content))
+                .build(),
+        )
+
+        val result = worker(repo, fileStore, QueueTrackResolver()).execute(TASK_ID)
+
+        assertEquals(WorkerResult.Completed, result)
+        assertEquals(
+            "a completed task must keep the etag learned from the response",
+            RESPONSE_ETAG,
+            repo.task.etag,
+        )
+        assertArrayEquals(content, fileStore.contentOf(requireNotNull(repo.task.mediaStoreId)))
     }
 
     @Test
@@ -783,11 +987,13 @@ class DownloadWorkerResumeTest {
  * 在真实文件替身之上注入写入期故障的 [TaskFileStore]。
  *
  * - [failAppendAfterBytes]：首次追加写入该字节数后抛出 IOException，模拟读取响应体中途断流。
+ * - [failTruncateAfterBytes]：首次截断重写写入该字节数后抛出 IOException，模拟 200 响应读流中断。
  * - [vanishAfterBytes]：首次追加写入该字节数后让条目从存储中消失，模拟写入过程中被系统清理。
  */
 private class InterruptingFileStore(private val delegate: FakeTaskFileStore) : TaskFileStore {
 
     var failAppendAfterBytes: Int? = null
+    var failTruncateAfterBytes: Int? = null
     var vanishAfterBytes: Int? = null
 
     /** 被标记为消失的条目：sizeOf 返回 -1，直到 delete 真正清掉它。 */
@@ -802,6 +1008,23 @@ private class InterruptingFileStore(private val delegate: FakeTaskFileStore) : T
         val vanishAfter = vanishAfterBytes
         failAppendAfterBytes = null
         vanishAfterBytes = null
+        return interruptible(underlying, failAfter, vanishAfter, file)
+    }
+
+    override suspend fun openTruncate(file: CreatedFile): OutputStream {
+        val underlying = delegate.openTruncate(file)
+        val failAfter = failTruncateAfterBytes
+        failTruncateAfterBytes = null
+        return interruptible(underlying, failAfter, vanishAfter = null, file)
+    }
+
+    /** 在 [failAfter] 字节后断流，或在 [vanishAfter] 字节后让条目消失；未配置时原样返回。 */
+    private fun interruptible(
+        underlying: OutputStream,
+        failAfter: Int?,
+        vanishAfter: Int?,
+        file: CreatedFile,
+    ): OutputStream {
         if (failAfter == null && vanishAfter == null) return underlying
 
         return object : OutputStream() {
@@ -832,8 +1055,6 @@ private class InterruptingFileStore(private val delegate: FakeTaskFileStore) : T
             override fun close() = underlying.close()
         }
     }
-
-    override suspend fun openTruncate(file: CreatedFile): OutputStream = delegate.openTruncate(file)
 
     override suspend fun complete(file: CreatedFile) = delegate.complete(file)
 
