@@ -3,8 +3,11 @@ package com.dawnmoon.music_download.ui.settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -111,7 +114,6 @@ data class SettingsCallbacks(
  *
  * @param focusKey 为 true 时进入页面即聚焦凭据输入框；工作台因缺少凭据跳转时使用。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     state: SettingsViewModel.State,
@@ -122,14 +124,45 @@ fun SettingsScreen(
 ) {
     var showCredits by rememberSaveable { mutableStateOf(false) }
     BackHandler(enabled = showCredits) { showCredits = false }
-    if (showCredits) {
-        CreditsScreen(onBack = { showCredits = false })
-        return
-    }
 
+    // 与进入设置页相同的共享 X 轴转场：鸣谢页向左推入，返回时反向。
+    AnimatedContent(
+        targetState = showCredits,
+        modifier = modifier.fillMaxSize(),
+        transitionSpec = {
+            val direction = if (targetState) 1 else -1
+            (
+                slideInHorizontally(tween(TRANSITION_MILLIS)) { it / SLIDE_FRACTION * direction } +
+                    fadeIn(tween(TRANSITION_MILLIS))
+                ) togetherWith (
+                slideOutHorizontally(tween(TRANSITION_MILLIS)) { -it / SLIDE_FRACTION * direction } +
+                    fadeOut(tween(TRANSITION_MILLIS / 2))
+                )
+        },
+        label = "settings_credits",
+    ) { creditsVisible ->
+        if (creditsVisible) {
+            CreditsScreen(onBack = { showCredits = false })
+        } else {
+            SettingsPage(state = state, callbacks = callbacks, onBack = onBack, focusKey = focusKey) {
+                showCredits = true
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsPage(
+    state: SettingsViewModel.State,
+    callbacks: SettingsCallbacks,
+    onBack: () -> Unit,
+    focusKey: Boolean,
+    onOpenCredits: () -> Unit,
+) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .nestedScroll(scrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -164,7 +197,7 @@ fun SettingsScreen(
             DownloadGroup(state = state, callbacks = callbacks)
             AppearanceGroup(state = state, callbacks = callbacks)
             HistoryGroup(callbacks = callbacks)
-            AboutGroup(onOpenCredits = { showCredits = true })
+            AboutGroup(onOpenCredits = onOpenCredits)
             Spacer(Modifier.size(16.dp))
         }
     }
@@ -577,3 +610,7 @@ private const val MIN_CONCURRENCY = 1f
 private const val MAX_CONCURRENCY = 5f
 
 private const val CONCURRENCY_STEPS = 3
+
+private const val TRANSITION_MILLIS = 300
+
+private const val SLIDE_FRACTION = 5
