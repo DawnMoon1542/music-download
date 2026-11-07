@@ -132,6 +132,31 @@ class ChkszApiTest {
     }
 
     @Test
+    fun `validateKey accepts artists returned as a string`() = runTest {
+        server.enqueueJson(
+            code = 200,
+            body = """
+                {
+                  "code": 200,
+                  "msg": "success",
+                  "data": {
+                    "songs": [
+                      {
+                        "id": 1315196858,
+                        "name": "Party Music",
+                        "artists": "Deep Side",
+                        "album": "Deep Side"
+                      }
+                    ]
+                  }
+                }
+            """.trimIndent(),
+        )
+
+        successOf(api.validateKey(credentials))
+    }
+
+    @Test
     fun `unauthorized response maps to invalid key failure`() = runTest {
         val message = "apikey 无效或已失效"
         server.enqueueJson(401, errorBody(401, message))
