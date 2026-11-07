@@ -1,6 +1,8 @@
 package com.dawnmoon.music_download.ui.workbench
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,10 +14,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,9 +32,13 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -54,6 +64,10 @@ data class WorkbenchCallbacks(
     val onCancel: (Long) -> Unit = {},
     val onRetry: (Long) -> Unit = {},
     val onDelete: (Long, Boolean) -> Unit = { _, _ -> },
+    val onPauseAll: () -> Unit = {},
+    val onResumeAll: () -> Unit = {},
+    val onRetryAllFailed: () -> Unit = {},
+    val onCancelAll: () -> Unit = {},
     val onOpenSettings: () -> Unit = {},
 )
 
@@ -79,6 +93,7 @@ fun WorkbenchScreen(
                 title = { Text(stringResource(R.string.workbench_title)) },
                 actions = {
                     QuotaLabel(quota = state.quota)
+                    BatchActionsMenu(callbacks = callbacks)
                     IconButton(onClick = callbacks.onOpenSettings) {
                         Icon(
                             imageVector = Icons.Default.Settings,
@@ -101,6 +116,77 @@ fun WorkbenchScreen(
             TaskList(state = state, callbacks = callbacks)
         }
     }
+}
+
+@Composable
+private fun BatchActionsMenu(callbacks: WorkbenchCallbacks) {
+    var expanded by remember { mutableStateOf(false) }
+    var showCancelAllConfirmation by remember { mutableStateOf(false) }
+
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = stringResource(R.string.more_actions_content_description),
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            BatchActionItem(text = R.string.action_pause_all) {
+                expanded = false
+                callbacks.onPauseAll()
+            }
+            BatchActionItem(text = R.string.action_resume_all) {
+                expanded = false
+                callbacks.onResumeAll()
+            }
+            BatchActionItem(text = R.string.action_retry_all_failed) {
+                expanded = false
+                callbacks.onRetryAllFailed()
+            }
+            BatchActionItem(text = R.string.action_cancel_all) {
+                expanded = false
+                showCancelAllConfirmation = true
+            }
+        }
+    }
+
+    // 取消全部不可撤销，先确认再交给引擎；打开确认框本身不触发取消。
+    if (showCancelAllConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showCancelAllConfirmation = false },
+            title = { Text(stringResource(R.string.action_cancel_all)) },
+            text = { Text(stringResource(R.string.cancel_all_confirmation)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showCancelAllConfirmation = false
+                        callbacks.onCancelAll()
+                    },
+                ) {
+                    Text(stringResource(R.string.action_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelAllConfirmation = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun BatchActionItem(
+    @StringRes text: Int,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(stringResource(text)) },
+        onClick = onClick,
+    )
 }
 
 @Composable

@@ -1,6 +1,7 @@
 package com.dawnmoon.music_download.ui.viewmodel
 
 import android.content.Context
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dawnmoon.music_download.R
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -45,6 +47,7 @@ class WorkbenchViewModel(
     private val quotaStore: QuotaStore,
     private val appContext: Context,
     private val clock: AppClock,
+    private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) : ViewModel() {
 
     private val input = MutableStateFlow("")
@@ -221,12 +224,13 @@ class WorkbenchViewModel(
         engine.retryAllFailed()
     }
 
-    private fun handleEnqueued(outcome: EnqueueOutcome.Enqueued) {
+    private suspend fun handleEnqueued(outcome: EnqueueOutcome.Enqueued) {
         if (outcome.created.isNotEmpty()) {
             engine.start(appContext)
             engine.requestDownload(outcome.created)
             input.value = ""
             selectedTab.value = WorkbenchTab.InProgress
+            requestNotificationPermissionIfNeeded()
         }
 
         val parts = buildList {
@@ -242,6 +246,19 @@ class WorkbenchViewModel(
         }
         val message = parts.ifEmpty { listOf(text(R.string.enqueue_nothing)) }.joinToString("；")
         eventChannel.trySend(WorkbenchEvent.Snackbar(message))
+    }
+
+    /**
+     * 在下载已经启动后请求一次通知权限。
+     *
+     * 事件发出时立即写入"已询问"标记：权限弹窗的结果不影响下载，也不等待用户选择，
+     * 因此不能把标记推迟到结果回调，否则重复入队会再次弹窗。
+     */
+    private suspend fun requestNotificationPermissionIfNeeded() {
+        if (sdkInt < Build.VERSION_CODES.TIRAMISU) return
+        if (settings.notificationAsked.first()) return
+        settings.markNotificationAsked()
+        eventChannel.trySend(WorkbenchEvent.RequestNotificationPermission)
     }
 
     /**

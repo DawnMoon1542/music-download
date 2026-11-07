@@ -22,6 +22,13 @@
     <string name="action_cancel">取消</string>
     <string name="action_retry">重试</string>
     <string name="action_delete_record">删除记录</string>
+    <string name="more_actions_content_description">更多操作</string>
+    <string name="action_pause_all">全部暂停</string>
+    <string name="action_resume_all">全部继续</string>
+    <string name="action_retry_all_failed">全部重试失败</string>
+    <string name="action_cancel_all">全部取消</string>
+    <string name="cancel_all_confirmation">将取消所有进行中的任务，此操作不可撤销。</string>
+    <string name="action_confirm">确认</string>
 
     <!-- 入队提示 -->
     <string name="enqueue_success">已加入 %1$d 个任务</string>
