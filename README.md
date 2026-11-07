@@ -29,3 +29,7 @@
 ```bash
 LIVE_API=1 ./gradlew :app:testDebugUnitTest --tests '*LiveApiSmokeTest'
 ```
+
+## 友链
+
+- [**LINUX DO**](https://linux.do) — A community for tech enthusiasts
