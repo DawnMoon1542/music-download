@@ -147,7 +147,7 @@ class AppContainer(context: Context) : AppDependencies {
             wakeLock = downloadWakeLock,
             clock = clock,
             serviceStopper = ServiceStopper { DownloadService.stop(appContext) },
-            serviceStarter = DownloadServiceStarter { context -> DownloadService.start(context) },
+            serviceStarter = DownloadServiceStarter { DownloadService.start(appContext) },
         )
     }
 

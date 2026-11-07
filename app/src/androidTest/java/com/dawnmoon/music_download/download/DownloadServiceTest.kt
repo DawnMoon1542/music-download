@@ -208,6 +208,25 @@ class DownloadServiceTest {
     }
 
     @Test
+    fun controlOperationOnDetachedEngineStartsForegroundServiceAndAttachesEngine() {
+        val harness = installEngineBackedDependencies()
+        runBlocking { seedDownloadingTask() }
+
+        // 服务当前未运行，引擎处于 detach 状态；控制操作必须自行拉起前台服务。
+        harness.engine.detach()
+        harness.engine.resumeAll()
+
+        assertTrue(
+            "引擎未 attach 时，控制操作应拉起前台服务",
+            waitUntil { isForeground() },
+        )
+        assertTrue(
+            "前台服务启动后应重新 attach 引擎并聚合活动任务",
+            waitUntil { harness.engine.snapshot.value.activeCount == 1 },
+        )
+    }
+
+    @Test
     fun serviceStopsItselfWhenNoWorkRemains() {
         startService()
 
@@ -261,7 +280,8 @@ class DownloadServiceTest {
             wakeLock = wakeLock,
             clock = SystemAppClock(),
             serviceStopper = ServiceStopper { },
-            serviceStarter = DownloadServiceStarter { },
+            // 控制操作通过该启动器拉起真实前台服务，与生产装配一致。
+            serviceStarter = DownloadServiceStarter { DownloadService.start(context) },
         )
         app.dependencies = ReplacedDependencies(originalDependencies, engine)
         dependenciesReplaced = true

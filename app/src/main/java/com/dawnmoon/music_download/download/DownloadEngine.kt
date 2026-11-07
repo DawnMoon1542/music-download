@@ -111,8 +111,18 @@ class DownloadEngine(
 
     /** 幂等启动前台服务；`detach` 后允许再次启动。 */
     override fun start(context: Context) {
+        ensureServiceStarted()
+    }
+
+    /**
+     * 幂等地拉起前台服务。
+     *
+     * [DownloadController.start] 与未 attach 时的控制操作共用该路径：多个控制操作同时到达时
+     * 只有第一次触发启动，避免重复投递 `startForegroundService`。
+     */
+    private fun ensureServiceStarted() {
         if (serviceStarted) return
-        serviceStarter.start(context)
+        serviceStarter.start()
         serviceStarted = true
     }
 
@@ -545,13 +555,21 @@ class DownloadEngine(
 
     /**
      * 把非挂起操作投递到引擎作用域；未 attach 时进入缓冲，attach 后重放。
+     *
+     * 引擎未 attach 说明前台服务没有运行（冷启动或空闲自停），此时必须同时拉起服务，
+     * 否则缓冲的操作永远不会被重放。`ensureServiceStarted` 在锁外调用，避免与 attach 的
+     * 同步块互相阻塞。
      */
     private fun launchOperation(block: suspend CoroutineScope.() -> Unit) {
         val scope = synchronized(operationLock) {
             engineScope ?: run {
                 pendingOperations += block
-                return
+                null
             }
+        }
+        if (scope == null) {
+            ensureServiceStarted()
+            return
         }
         scope.launch(block = block)
     }

@@ -1,6 +1,5 @@
 package com.dawnmoon.music_download.download
 
-import android.content.Context
 import com.dawnmoon.music_download.core.AppClock
 import com.dawnmoon.music_download.data.remote.ApiFailure
 import com.dawnmoon.music_download.data.remote.ApiResponse
@@ -730,6 +729,113 @@ class DownloadEngineTest {
     }
 
     @Test
+    fun `a download request after the service stopped starts it again and replays once attached`() = runTest {
+        val harness = EngineHarness()
+        harness.notifier.timeSource = { testScheduler.currentTime }
+        harness.repo.add(queuedTask(1))
+
+        // 模拟前台服务空闲自停：先 attach，再 detach 清空引擎作用域。
+        val initialScope = CoroutineScope(Job() + StandardTestDispatcher(testScheduler))
+        harness.engine.attach(initialScope)
+        runCurrent()
+        harness.engine.detach()
+        runCurrent()
+        initialScope.cancel()
+
+        harness.engine.requestDownload(listOf(1))
+        runCurrent()
+
+        assertEquals(
+            "requesting downloads on a detached engine must start the foreground service",
+            1,
+            harness.serviceStarter.startCount,
+        )
+        assertEquals(
+            "the request must stay buffered until the service attaches again",
+            TaskStatus.Queued,
+            harness.repo.byId(1)?.status,
+        )
+
+        val replayScope = CoroutineScope(Job() + StandardTestDispatcher(testScheduler))
+        harness.engine.attach(replayScope)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        assertEquals(
+            "attaching again must replay the buffered request and drive the task to completion",
+            TaskStatus.Completed,
+            harness.repo.byId(1)?.status,
+        )
+
+        harness.engine.detach()
+        runCurrent()
+        replayScope.cancel()
+    }
+
+    @Test
+    fun `resuming all after the service stopped starts it again`() = engineTest { harness ->
+        harness.repo.add(pausedTask(1, resolved = true))
+
+        harness.detachOnce()
+        runCurrent()
+
+        harness.engine.resumeAll()
+        runCurrent()
+
+        assertEquals(
+            "resumeAll on a detached engine must start the foreground service",
+            1,
+            harness.serviceStarter.startCount,
+        )
+        assertEquals(
+            "the buffered resumeAll must leave the task paused until the service attaches",
+            TaskStatus.Paused,
+            harness.repo.byId(1)?.status,
+        )
+    }
+
+    @Test
+    fun `retrying after the service stopped starts it again`() = engineTest { harness ->
+        harness.repo.add(failedTask(1))
+
+        harness.detachOnce()
+        runCurrent()
+
+        harness.engine.retry(1)
+        runCurrent()
+
+        assertEquals(
+            "retry on a detached engine must start the foreground service",
+            1,
+            harness.serviceStarter.startCount,
+        )
+        assertEquals(
+            "the buffered retry must leave the failed task for the service to replay",
+            TaskStatus.Failed,
+            harness.repo.byId(1)?.status,
+        )
+    }
+
+    @Test
+    fun `repeated control operations while detached start the service only once`() = engineTest { harness ->
+        harness.repo.add(queuedTask(1))
+
+        harness.detachOnce()
+        runCurrent()
+
+        harness.engine.requestDownload(listOf(1))
+        runCurrent()
+        harness.engine.resumeAll()
+        runCurrent()
+
+        assertEquals(
+            "a service that is already starting must not be started again",
+            1,
+            harness.serviceStarter.startCount,
+        )
+    }
+
+    @Test
     fun `retrying a key-level failure resumes parsing for tasks dropped by the pause`() = engineTest { harness ->
         harness.repo.add(queuedTask(1))
         harness.repo.add(queuedTask(2))
@@ -1091,7 +1197,7 @@ internal class EngineHarness(
         wakeLock = wakeLock,
         clock = clock,
         serviceStopper = stopper,
-        serviceStarter = serviceStarter,
+        serviceStarter = serviceStarter.starter,
     )
 
     private var detached = false
@@ -1336,13 +1442,17 @@ internal class EngineFakeStopper : ServiceStopper {
     }
 }
 
-internal class EngineFakeServiceStarter : DownloadServiceStarter {
+/**
+ * 记录前台服务启动次数。
+ *
+ * 通过 SAM 适配器持有启动契约，而不是直接实现接口：启动器签名正在从 `start(context)` 迁移到
+ * 无参 `start()`，适配器对两种签名都成立，使红阶段失败在行为断言而不是编译错误上。
+ */
+internal class EngineFakeServiceStarter {
     var startCount = 0
         private set
 
-    override fun start(context: Context) {
-        startCount += 1
-    }
+    val starter: DownloadServiceStarter = DownloadServiceStarter { startCount += 1 }
 }
 
 /**

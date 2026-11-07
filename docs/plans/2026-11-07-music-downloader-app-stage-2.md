@@ -43,6 +43,14 @@
 - [x] Task 3-2 — 解析队列、下载池与 DownloadEngine
 - [x] Task 3-3 — 前台服务、容器装配与集成验证
 
+### Group 4：Stage 审查修复
+
+- [x] Task 2-修复1：控制操作自动启动下载服务
+- [ ] Task 2-修复2：采集直链 ETag 用于 If-Range 续传
+- [ ] Task 2-修复3：向 Stage 3 暴露 TaskFileStore
+- [ ] Task 2-修复4：416 响应立即截断待下载文件
+- [ ] Task 2-修复5：补充 FileNamer 测试并收尾下载初始化异常
+
 ---
 
 ### Task 1-1：TaskFileStore 接口与 MediaStore 实现
@@ -373,3 +381,167 @@
 #### Step 3：验证与整理
 
 按计划头部运行构建、单元测试、仪器测试与 `lintDebug`，全部通过。
+
+---
+
+### Task 2-修复1：控制操作自动启动下载服务
+
+**依赖：** Task 3-2、Task 3-3
+
+**文件：**
+- 修改：`app/src/main/java/com/dawnmoon/music_download/download/DownloadEngine.kt`
+- 修改：`app/src/main/java/com/dawnmoon/music_download/download/DownloadController.kt`
+- 修改：`app/src/main/java/com/dawnmoon/music_download/AppContainer.kt`
+- 测试：`app/src/test/java/com/dawnmoon/music_download/download/DownloadEngineTest.kt`
+- 测试：`app/src/androidTest/java/com/dawnmoon/music_download/download/DownloadServiceTest.kt`
+
+**提交信息：**
+
+`fix: 控制操作确保启动下载服务`
+
+#### Step 1：编写失败测试
+
+- `EngineFakeServiceStarter` 改为实现无参 `DownloadServiceStarter`，保留 `startCount`。
+- `DownloadEngineTest`：引擎 `attach` 后 `detach`（模拟服务空闲自停清空 `engineScope`），分别调用 `resumeAll`、`retry`、`requestDownload`，断言每次都触发一次 `startCount`；再次 `attach` 后，断言缓冲的操作被重放且任务继续推进。
+- 保持既有「attach 之前发起的操作在 attach 后按序重放」用例不变。
+- `DownloadServiceTest`：在已 `detach` 的引擎上触发控制操作，断言前台服务出现并完成 `attach`。
+
+运行 `./gradlew :app:testDebugUnitTest`，确认 `startCount` 断言失败。
+
+#### Step 2：实现最终行为
+
+- `DownloadServiceStarter` 改为无参 `fun interface`（`fun start()`）；`AppContainer` 以 `appContext` 绑定 `DownloadService.start(appContext)`；`DownloadEngine.start(context)` 保留 `DownloadController` 的公开签名，内部委托同一个无参启动逻辑（`context` 参数不再使用）。
+- 抽取幂等的 `ensureServiceStarted()`：`serviceStarted` 为真时直接返回，否则调用 `serviceStarter.start()` 并置位；`start(context)` 与未 attach 的控制操作共用该路径。
+- `launchOperation`：先在 `synchronized(operationLock)` 内读取 `engineScope`；为空时把 block 加入 `pendingOperations`，在锁外调用 `ensureServiceStarted()` 后返回；非空时直接 `launch`，避免与 `attach` 的同步块竞争。
+- `requestDownload` 也经由 `launchOperation` 启动服务；`attach` 仍按原顺序重放 `pendingOperations`，`detach` 仍重置 `serviceStarted`。
+- 更新 `DownloadController` 的 KDoc，说明控制操作在引擎未 attach 时会自动拉起前台服务。
+
+#### Step 3：验证与整理
+
+`./gradlew :app:testDebugUnitTest`、`./gradlew :app:connectedDebugAndroidTest`、`./gradlew :app:assembleDebug` 全部通过；确认重复调用控制操作不会重复启动服务。
+
+---
+
+### Task 2-修复2：采集直链 ETag 用于 If-Range 续传
+
+**依赖：** Task 2-1、Task 2-2
+
+**文件：**
+- 修改：`app/src/main/java/com/dawnmoon/music_download/download/DownloadWorker.kt`
+- 测试：`app/src/test/java/com/dawnmoon/music_download/download/DownloadWorkerResumeTest.kt`
+
+**提交信息：**
+
+`fix: 采集直链 ETag 用于 If-Range`
+
+#### Step 1：编写失败测试
+
+- 新增用例：MockWebServer 首次返回 200 且带 `ETag: "v1"`，通过 `InterruptingFileStore` 在写入中途抛 `IOException`；第二次请求返回 206。断言第二次请求包含 `If-Range: "v1"`，`ResumableTaskRepository.streamUpdates` 记录的 etag 为 `"v1"`，且 `bytesAtStreamUpdate` 保留了已写字节。
+- 补充一个任务正常 `Completed` 后 etag 已持久化的断言。
+- 现有响应未带 ETag 的用例保持不变。
+
+运行 `./gradlew :app:testDebugUnitTest`，确认新用例失败（生产路径从未读取响应 ETag）。
+
+#### Step 2：实现最终行为
+
+- 在 `download()` 的 `response.use { result -> }` 内、读取响应体之前读取 `result.header("ETag")`；仅对 200/206 成功响应生效。
+- etag 非空且与 `workingTask.etag` 不同时，若 `workingTask.md5 != null`，用任务现有 `streamUrl/sizeBytes/md5/format` 构造 `ResolvedTrack`（仅 etag 替换为新值）并调用 `repo.updateStream` 持久化。md5 非空保证 `provesSameContent` 走 MD5 分支，保留 `bytesDownloaded/mediaStoreId/fileName`；md5 为空时跳过，不启用 If-Range。
+- 持久化后同步 `workingTask = workingTask.copy(etag = etag)`，使后续 Range 请求立即带上 If-Range。
+- 换链后新 track 的 etag 为 null，下一次成功响应按相同逻辑重新捕获；`refreshLink` 的 `updateStream` 写入新 track 的 etag 属于预期行为，捕获发生在新直链响应之后。
+- 不使用会清空文件绑定的仓库调用；若因测试替身导致 `updateStream` 不适用，保持「md5 为空则跳过」的分支，不新增仓库方法。
+
+#### Step 3：验证与整理
+
+`./gradlew :app:testDebugUnitTest` 通过；确认既有续传、换链与瞬时重试用例未受影响。
+
+---
+
+### Task 2-修复3：向 Stage 3 暴露 TaskFileStore
+
+**依赖：** Task 3-3
+
+**文件：**
+- 修改：`app/src/main/java/com/dawnmoon/music_download/AppDependencies.kt`
+- 修改：`app/src/main/java/com/dawnmoon/music_download/AppContainer.kt`
+- 测试：`app/src/androidTest/java/com/dawnmoon/music_download/AppContainerTest.kt`
+
+**提交信息：**
+
+`feat: 向界面层暴露 TaskFileStore`
+
+#### Step 1：编写失败测试
+
+- `AppContainerTest` 增加断言：`assertSame(container.fileStore, container.fileStore)`，并确认通过 `AppDependencies` 类型也能读取同一实例。
+- `FakeAppDependencies` 增加 `override val fileStore: TaskFileStore`，读取时返回 `unsupported()`。
+- 运行 `./gradlew :app:assembleDebug`，确认因 `AppDependencies` 缺少 `fileStore` 成员而编译失败。
+
+#### Step 2：实现最终行为
+
+- `AppDependencies` 增加 `val fileStore: TaskFileStore`（import `com.dawnmoon.music_download.download.TaskFileStore`），作为 Stage 3 的 `TaskFileStore.deleteById` 入口。
+- `AppContainer` 把 `private val fileStore` 改为 `override val fileStore`，保留 `by lazy` 单例，worker 与 Stage 3 共用同一实例。
+- `AppContainerTest.FakeAppDependencies` 增加 `override val fileStore: TaskFileStore get() = unsupported()`。
+
+#### Step 3：验证与整理
+
+`./gradlew :app:assembleDebug` 与 `./gradlew :app:testDebugUnitTest` 通过；启动模拟器后运行 `./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.dawnmoon.music_download.AppContainerTest`，确认容器只暴露一个实例。
+
+---
+
+### Task 2-修复4：416 响应立即截断待下载文件
+
+**依赖：** Task 2-2
+
+**文件：**
+- 修改：`app/src/main/java/com/dawnmoon/music_download/download/DownloadWorker.kt`
+- 测试：`app/src/test/java/com/dawnmoon/music_download/download/DownloadWorkerResumeTest.kt`
+
+**提交信息：**
+
+`fix: 416 响应立即截断待下载文件`
+
+#### Step 1：编写失败测试
+
+- 新增用例：首次请求返回 416，下一次请求以 `SocketPolicy.DISCONNECT_AT_START` 或 `InterruptingFileStore` 制造瞬时 `IOException`，第三次请求返回 200；断言结果为 `Completed` 且文件内容完整。
+- 保留现有「416 截断重下成功」用例。
+- 运行 `./gradlew :app:testDebugUnitTest`，确认新用例失败（第二次请求仍发送旧 Range 并再次收到 416）。
+
+#### Step 2：实现最终行为
+
+- 在 `HTTP_RANGE_NOT_SATISFIABLE` 且 `!truncated` 的分支中，先调用 `fileStore.openTruncate(file).close()` 并 `repo.updateProgress(workingTask.id, 0L)`；清空成功后再置 `start = 0`、`truncated = true`、`Decision.Continue`。
+- `openTruncate` 抛 `IOException` 时走 `failStorage(workingTask.id, error)`（删除条目并 `markFailed(Storage)`），不得吞掉异常；`truncated` 只在清空成功后置位。
+- 保持 `truncated` 已为 true 时直接以 `Failed(Network, "Range 请求持续无法满足")` 结束，避免无限截断。
+
+#### Step 3：验证与整理
+
+`./gradlew :app:testDebugUnitTest` 通过；确认瞬时错误后的重试仍从 0 开始且不会重复发送 416。
+
+---
+
+### Task 2-修复5：补充 FileNamer 测试并收尾下载初始化异常
+
+**依赖：** Task 1-3、Task 2-1
+
+**文件：**
+- 创建：`app/src/test/java/com/dawnmoon/music_download/download/FileNamerTest.kt`
+- 修改：`app/src/main/java/com/dawnmoon/music_download/download/DownloadWorker.kt`
+- 修改：`app/src/test/java/com/dawnmoon/music_download/download/DownloadWorkerTest.kt`
+
+**提交信息：**
+
+`fix: 收尾下载初始化异常并补充 FileNamer 测试`
+
+#### Step 1：编写失败测试
+
+- 新建 `FileNamerTest`，使用最小 Fake `TaskRepository`：`allocateFileName` 返回 `a.mp3` 时 `uniqueName` 原样返回；返回 `a (1).mp3` 时不二次追加；抛异常时异常向上传播。
+- `DownloadWorkerTest`：给 `FakeTaskRepository` 增加可抛出 `IllegalStateException` 的命名/attach 开关；断言 `execute` 返回 `WorkerResult.Failed(Unknown)`，仓库任务状态为 `Failed`，且没有创建 pending 文件。
+- 运行 `./gradlew :app:testDebugUnitTest`，确认 `FileNamerTest` 不存在导致编译失败，且 Worker 用例在异常逃逸时失败。
+
+#### Step 2：实现最终行为
+
+- 在 `DefaultDownloadWorker.execute` 的 `IOException` catch 之后增加 `catch (error: Exception)`（`CancellationException` 已被前面的分支捕获），调用 `fail(taskId, FailureKind.Unknown, error.message ?: "下载初始化失败")`，让 `allocateFileName`/`attachFile` 抛出的非 IO 异常不再逃逸到引擎 Job。
+- 若 `attachFile` 在 `createPending` 之后失败，删除已创建的 pending 条目，避免留下孤儿文件；删除失败不覆盖原始失败结论。
+- 保持取消路径仍由 `CancellationException` 分支处理，暂停/取消语义不变。
+
+#### Step 3：验证与整理
+
+`./gradlew :app:testDebugUnitTest` 通过；确认初始化异常后任务落为 `Failed`、引擎可正常进入空闲且无残留 pending 文件。

@@ -7,19 +7,19 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * 启动前台服务的副作用，从引擎中解耦出来。
  *
- * 真实实现由 Task 3-3 注入（`DownloadService.start`）；测试替换为 Fake，避免引擎直接依赖
- * Android 组件。引擎通过 [DownloadController.start] 幂等地触发它。
+ * 真实实现由容器以 `appContext` 绑定 `DownloadService.start`；测试替换为 Fake，避免引擎直接
+ * 依赖 Android 组件。引擎通过 [DownloadController.start] 与控制操作幂等地触发它。
  */
 fun interface DownloadServiceStarter {
-    fun start(context: Context)
+    fun start()
 }
 
 /**
  * 下载引擎对界面暴露的控制入口。
  *
  * 除 [attach] 外所有操作都是非挂起的：引擎在 `attach` 的作用域内串行化状态写入，调用方只需
- * 触发意图。`attach` 之前发起的操作会被缓冲，服务就绪后按顺序重放，避免冷启动时任务停留在
- * Queued。
+ * 触发意图。引擎未 `attach` 时发起的控制操作会自动拉起前台服务，并把操作缓冲到服务就绪后
+ * 按顺序重放，避免冷启动或空闲自停后任务停留在 Queued。
  */
 interface DownloadController {
 
