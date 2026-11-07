@@ -1,0 +1,60 @@
+package com.dawnmoon.music_download.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import com.dawnmoon.music_download.ui.settings.SettingsScreen
+import com.dawnmoon.music_download.ui.viewmodel.AppViewModelFactory
+import com.dawnmoon.music_download.ui.workbench.WorkbenchScreen
+
+/** 单 Activity 内的页面标识；不使用 Navigation Compose。 */
+enum class AppRoute { Workbench, Settings }
+
+/**
+ * 应用根组合：负责工作台与设置页的切换，并承载全局 Snackbar。
+ *
+ * @param viewModelFactory 页面 ViewModel 工厂；Task 1-2 起由各页面使用。
+ */
+@Composable
+fun AppRoot(
+    @Suppress("UNUSED_PARAMETER") viewModelFactory: AppViewModelFactory,
+    modifier: Modifier = Modifier,
+) {
+    var route by rememberSaveable { mutableStateOf(AppRoute.Workbench) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    BackHandler(enabled = route == AppRoute.Settings) {
+        route = AppRoute.Workbench
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        modifier = modifier,
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            when (route) {
+                AppRoute.Workbench -> WorkbenchScreen(
+                    onOpenSettings = { route = AppRoute.Settings },
+                )
+                AppRoute.Settings -> SettingsScreen(
+                    onBack = { route = AppRoute.Workbench },
+                )
+            }
+        }
+    }
+}

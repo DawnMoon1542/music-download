@@ -1,3 +1,17 @@
 <resources>
     <string name="app_name">Music Download</string>
+
+    <!-- 工作台 -->
+    <string name="workbench_title">音乐下载</string>
+    <string name="link_input_placeholder">粘贴网易云链接或分享文案</string>
+    <string name="enqueue_action">解析并下载</string>
+    <string name="tab_in_progress">进行中</string>
+    <string name="tab_completed">已完成</string>
+    <string name="empty_tasks">暂无下载任务，粘贴链接开始</string>
+
+    <!-- 设置 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_content_description">设置</string>
+    <string name="back_content_description">返回</string>
+    <string name="settings_placeholder">设置项将在后续版本提供</string>
 </resources>
