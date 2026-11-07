@@ -109,6 +109,10 @@ class DefaultDownloadWorker(
         finishCancelled(taskId, signal)
     } catch (error: IOException) {
         fail(taskId, FailureKind.Network, error.message ?: "网络中断")
+    } catch (error: Exception) {
+        // 初始化阶段的非 IO 异常（命名、绑定等）若继续逃逸，引擎 Job 会直接结束，
+        // 任务则永远停在 Downloading。取消已由前一个分支收尾，这里统一记为 Unknown。
+        fail(taskId, FailureKind.Unknown, error.message ?: "下载初始化失败")
     }
 
     /**
@@ -240,12 +244,23 @@ class DefaultDownloadWorker(
         bytesDownloaded: Long,
     ): CreatedFile {
         val created = fileStore.createPending(fileName, format.mimeType)
-        repo.attachFile(
-            id = task.id,
-            fileName = fileName,
-            mediaStoreId = created.mediaStoreId,
-            bytesDownloaded = bytesDownloaded,
-        )
+        try {
+            repo.attachFile(
+                id = task.id,
+                fileName = fileName,
+                mediaStoreId = created.mediaStoreId,
+                bytesDownloaded = bytesDownloaded,
+            )
+        } catch (error: Exception) {
+            // 条目已创建但未绑定到任务，若不删除会在 Music 目录留下无人引用的孤儿文件。
+            // 清理自身失败不能改变最初的绑定失败结论，因此吞掉后原样抛出。
+            try {
+                fileStore.delete(created)
+            } catch (_: Exception) {
+                // 保留原始异常用于上报。
+            }
+            throw error
+        }
         return created
     }
 

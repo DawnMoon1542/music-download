@@ -253,6 +253,43 @@ class DownloadWorkerTest {
         assertEquals(targetUrl, request.url.toString())
     }
 
+    @Test
+    fun `fails with unknown and leaves no pending file when the file name cannot be allocated`() = runTest {
+        val directory = tempFolder.newFolder()
+        val repo = FakeTaskRepository(
+            task(sizeBytes = null, md5 = null, streamUrl = streamUrl()),
+        ).apply { failAllocation = true }
+
+        val result = worker(repo, FakeTaskFileStore(directory)).execute(TASK_ID)
+
+        assertEquals(WorkerResult.Failed(FailureKind.Unknown), result)
+        assertEquals("the task must not stay in Downloading", TaskStatus.Failed, repo.task.status)
+        assertEquals(FailureKind.Unknown, repo.failureKind)
+        assertTrue(
+            "a failed name allocation must not create a pending file",
+            directory.listFiles().orEmpty().isEmpty(),
+        )
+    }
+
+    @Test
+    fun `fails with unknown and removes the pending file when it cannot be attached`() = runTest {
+        val directory = tempFolder.newFolder()
+        val repo = FakeTaskRepository(
+            task(sizeBytes = null, md5 = null, streamUrl = streamUrl()),
+        ).apply { failAttach = true }
+        val fileStore = FakeTaskFileStore(directory)
+
+        val result = worker(repo, fileStore).execute(TASK_ID)
+
+        assertEquals(WorkerResult.Failed(FailureKind.Unknown), result)
+        assertEquals("the task must not stay in Downloading", TaskStatus.Failed, repo.task.status)
+        assertEquals(FailureKind.Unknown, repo.failureKind)
+        assertTrue(
+            "the pending file created before the failed attach must be removed",
+            directory.listFiles().orEmpty().isEmpty(),
+        )
+    }
+
     private fun worker(repo: FakeTaskRepository, fileStore: FakeTaskFileStore): DefaultDownloadWorker =
         DefaultDownloadWorker(
             repo = repo,
@@ -370,6 +407,12 @@ private class FakeTaskRepository(
     var failureKind: FailureKind? = null
         private set
 
+    /** 为 true 时模拟仓库命名失败。 */
+    var failAllocation: Boolean = false
+
+    /** 为 true 时模拟 pending 文件已创建、但绑定到任务失败。 */
+    var failAttach: Boolean = false
+
     override fun observeInProgress(): Flow<List<DownloadTask>> =
         MutableStateFlow<List<DownloadTask>>(emptyList())
 
@@ -399,6 +442,7 @@ private class FakeTaskRepository(
         check(task.status == TaskStatus.Downloading) {
             "the created file must be attached after startDownloading"
         }
+        if (failAttach) throw IllegalStateException("文件绑定失败")
         attachedMediaStoreId = mediaStoreId
         task = task.copy(
             fileName = fileName,
@@ -428,6 +472,7 @@ private class FakeTaskRepository(
     }
 
     override suspend fun allocateFileName(id: Long, base: BaseFileName): String {
+        if (failAllocation) throw IllegalStateException("文件名分配失败")
         allocatedBases += base
         return allocatedName
     }
