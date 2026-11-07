@@ -13,6 +13,7 @@ import com.dawnmoon.music_download.data.repository.QuotaStore
 import com.dawnmoon.music_download.data.repository.TaskRepository
 import com.dawnmoon.music_download.domain.TrackResolver
 import com.dawnmoon.music_download.download.DownloadController
+import com.dawnmoon.music_download.download.TaskFileStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
@@ -38,6 +39,12 @@ class AppContainerTest {
         // UI 与前台服务都经由 AppDependencies.downloadController 读取引擎；
         // 若每次访问都新建 DownloadEngine，界面操作与服务执行会落在不同引擎上。
         assertSame(container.downloadController, container.downloadController)
+
+        // Stage 3 通过 AppDependencies 读取文件存储来执行 deleteById；
+        // 它必须与 worker/引擎使用同一个实例，否则界面删除会作用在另一份存储状态上。
+        assertSame(container.fileStore, container.fileStore)
+        val dependencies: AppDependencies = container
+        assertSame(container.fileStore, dependencies.fileStore)
     }
 
     @Test
@@ -83,6 +90,7 @@ private class FakeAppDependencies : AppDependencies {
     override val keyValidator: KeyValidator get() = unsupported()
     override val qualityResolver: TrackResolver get() = unsupported()
     override val linkResolver: LinkResolver get() = unsupported()
+    override val fileStore: TaskFileStore get() = unsupported()
     override val downloadController: DownloadController get() = unsupported()
 
     private fun unsupported(): Nothing = error("测试替身不提供真实依赖")

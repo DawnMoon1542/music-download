@@ -47,7 +47,7 @@
 
 - [x] Task 2-修复1：控制操作自动启动下载服务
 - [x] Task 2-修复2：采集直链 ETag 用于 If-Range 续传
-- [ ] Task 2-修复3：向 Stage 3 暴露 TaskFileStore
+- [x] Task 2-修复3：向 Stage 3 暴露 TaskFileStore
 - [ ] Task 2-修复4：416 响应立即截断待下载文件
 - [ ] Task 2-修复5：补充 FileNamer 测试并收尾下载初始化异常
 

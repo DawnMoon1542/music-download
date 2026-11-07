@@ -107,8 +107,8 @@ class AppContainer(context: Context) : AppDependencies {
 
     override val linkResolver: LinkResolver by lazy { HttpShortLinkResolver(okHttpClient) }
 
-    /** 下载文件统一写入公共 Music 目录的 pending 条目。 */
-    private val fileStore: TaskFileStore by lazy { MediaStoreTaskFileStore(appContext) }
+    /** 下载文件统一写入公共 Music 目录的 pending 条目；worker、引擎与 Stage 3 共用此单例。 */
+    override val fileStore: TaskFileStore by lazy { MediaStoreTaskFileStore(appContext) }
 
     private val downloadNotifications: DownloadNotifications by lazy {
         DownloadNotifications(appContext)
