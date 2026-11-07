@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主题图标图层：单色渲染时不能依赖背景色间隙，因此只保留音符与镂空箭头的徽标。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="-2.5"
+        android:translateY="-2.5">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M47,30.5C47,29.1 48.1,28 49.5,28L51,28C51.6,33.4 55.2,36.8 60.6,38.6C66.5,40.6 70,45.2 69.2,51.6C68.2,47.6 64.8,44.9 59.2,44C56.1,43.5 53.4,42.4 51.5,40.7L51.5,64C51.5,70.4 46.3,75.5 40,75.5C33.7,75.5 28.5,71.4 28.5,66C28.5,60.6 33.7,56.5 40,56.5C42.6,56.5 45,57.2 47,58.4Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M68,53A15,15 0,1 1,67.99 53ZM66.2,59.5L69.8,59.5L69.8,68.6L72.9,65.5L75.4,68L68,75.4L60.6,68L63.1,65.5L66.2,68.6Z" />
+    </group>
+</vector>
