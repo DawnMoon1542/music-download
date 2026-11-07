@@ -55,6 +55,7 @@ data class TaskUiModel(
     val canResume: Boolean,
     val canCancel: Boolean,
     val canRetry: Boolean,
+    val canDelete: Boolean,
 )
 
 /** 由 ViewModel 推送给界面的一次性事件。 */

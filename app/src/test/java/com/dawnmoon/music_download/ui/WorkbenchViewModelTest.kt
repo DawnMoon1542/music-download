@@ -119,6 +119,27 @@ class WorkbenchViewModelTest {
             assertEquals(listOf(1L), viewModel.state.value.inProgress.map { it.id })
         }
 
+    @Test
+    fun `only cancelled tasks offer deleting their record`() =
+        runTest(dispatcher.scheduler) {
+            val statuses = TaskStatus.entries
+            repo.inProgress.value = statuses.mapIndexed { index, status ->
+                task(id = index + 1L, status = status)
+            }
+            val viewModel = createViewModel()
+            dispatcher.scheduler.runCurrent()
+
+            val models = viewModel.state.value.inProgress
+            assertEquals(statuses, models.map { statuses[it.id.toInt() - 1] })
+            statuses.zip(models).forEach { (status, model) ->
+                assertEquals(
+                    "canDelete for $status",
+                    status == TaskStatus.Cancelled,
+                    model.canDelete,
+                )
+            }
+        }
+
     // endregion
 
     // region 引擎控制

@@ -8,6 +8,20 @@
     <string name="tab_in_progress">进行中</string>
     <string name="tab_completed">已完成</string>
     <string name="empty_tasks">暂无下载任务，粘贴链接开始</string>
+    <string name="empty_history">暂无历史任务</string>
+    <string name="quality_label">音质</string>
+    <string name="quota_summary">免费 %1$s · 付费 %2$s</string>
+    <string name="quota_unknown">—</string>
+    <string name="quota_low_warning">额度不足</string>
+    <string name="task_failure_detail">失败详情：%1$s</string>
+    <string name="task_cover_content_description">封面</string>
+
+    <!-- 任务操作 -->
+    <string name="action_pause">暂停</string>
+    <string name="action_resume">继续</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_retry">重试</string>
+    <string name="action_delete_record">删除记录</string>
 
     <!-- 入队提示 -->
     <string name="enqueue_success">已加入 %1$d 个任务</string>

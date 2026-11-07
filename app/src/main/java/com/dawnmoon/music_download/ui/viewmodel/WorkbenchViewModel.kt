@@ -325,6 +325,7 @@ class WorkbenchViewModel(
                 status == TaskStatus.Paused ||
                 status == TaskStatus.Failed,
             canRetry = status == TaskStatus.Failed,
+            canDelete = status == TaskStatus.Cancelled,
         )
     }
 
